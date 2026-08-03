@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useAccount, useChainId, useWalletClient } from "wagmi";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { placeMarketOrder, getAllMids, getMeta, type PerpMarket } from "@/lib/hyperliquid";
 
 const MEMECOINS = ["PURR", "HYPE", "WIF", "TRUMP", "kPEPE", "kBONK", "DOGE"];
@@ -48,7 +47,7 @@ export default function TradePanel() {
 
   async function submit() {
     if (!isConnected || !address || !walletClient) {
-      setErr("Connect a wallet first");
+      setErr("Connect an EVM wallet first");
       return;
     }
     setBusy(true);
@@ -62,7 +61,7 @@ export default function TradePanel() {
         leverage,
         address,
         walletClient,
-        testnet: true, // MVP: testnet only
+        testnet: true,
       });
       setResult(JSON.stringify(r, null, 2).slice(0, 400));
     } catch (e: any) {
@@ -77,15 +76,14 @@ export default function TradePanel() {
   const levCapped = market ? Math.min(leverage, market.maxLeverage) : leverage;
 
   return (
-    <div className="mt-8 border border-border rounded-lg p-5 bg-panel">
+    <div className="border border-border rounded-lg p-5 bg-panel">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold">Trade</h2>
-        <ConnectButton accountStatus="address" chainStatus="icon" showBalance={false} />
+        <span className="text-xs text-yellow-400">testnet</span>
       </div>
 
-      <div className="text-xs text-muted mb-4">
-        Connected: {address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "none"} · chainId {chainId} ·{" "}
-        <span className="text-yellow-400">testnet</span>
+      <div className="text-xs text-muted mb-4 font-mono">
+        {address ? `EVM ${address.slice(0, 6)}…${address.slice(-4)}` : "no EVM wallet"} · chainId {chainId}
       </div>
 
       {/* Side toggle */}
@@ -115,7 +113,7 @@ export default function TradePanel() {
         onChange={(e) => setCoin(e.target.value)}
         className="w-full bg-bg border border-border rounded-md px-3 py-2 mb-1 font-mono"
       >
-        {markets.length === 0 && <option value="">loading…</option>}
+        {markets.length === 0 && <option value="">loading markets…</option>}
         {markets.map((m) => (
           <option key={m.name} value={m.name}>
             {m.name} (max {m.maxLeverage}x)
@@ -162,7 +160,7 @@ export default function TradePanel() {
           side === "long" ? "bg-bull text-black hover:bg-bull/90" : "bg-bear text-white hover:bg-bear/90"
         } disabled:opacity-40 disabled:cursor-not-allowed`}
       >
-        {busy ? "Placing…" : `${side.toUpperCase()} ${coin} ${levCapped}x`}
+        {busy ? "Placing…" : `${side.toUpperCase()} ${coin} ${levCapped}x · $${sizeUsd}`}
       </button>
 
       {err && <div className="mt-4 p-3 bg-bear/10 border border-bear/40 rounded text-xs text-bear font-mono whitespace-pre-wrap">{err}</div>}
