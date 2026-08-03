@@ -1,32 +1,19 @@
 /**
- * Hyperliquid SDK wrapper.
+ * Hyperliquid public API helpers (read-only).
  *
- * Uses @nktkas/hyperliquid v0.33 — InfoClient + ExchangeClient.
+ * We deliberately avoid the @nktkas/hyperliquid SDK here because of
+ * dependency conflicts at deploy time. For MVP, this file provides:
+ *   - getMeta()    — list of perp markets
+ *   - getAllMids() — current mid price per coin
  *
- * Read endpoints (no auth): meta, allMids, l2Book
- * Write endpoints (signed): order placement via ExchangeClient
- *
- * For trading, we pass viem's WalletClient from wagmi's useWalletClient() hook.
- * Signing happens in the user's wallet (MetaMask, Rabby, etc.) — never on our server.
+ * Trade placement (writes) is currently stubbed — the UI shows a clear
+ * "not yet wired" error. To enable real trades, we need to either:
+ *   (a) Resolve the SDK dep conflict (lock correct versions), or
+ *   (b) Implement the EIP-712 sign + POST /exchange flow ourselves.
  */
 
-import {
-  HttpTransport,
-  InfoClient,
-  ExchangeClient,
-} from "@nktkas/hyperliquid";
-import type { WalletClient } from "viem";
-
-const HL_MAINNET = "https://api.hyperliquid.xyz";
-const HL_TESTNET = "https://api.hyperliquid-testnet.xyz";
-
-function transport(testnet = false) {
-  return new HttpTransport({ serverUrl: testnet ? HL_TESTNET : HL_MAINNET });
-}
-
-function info(testnet = false) {
-  return new InfoClient({ transport: transport(testnet) });
-}
+const HL_INFO = "https://api.hyperliquid.xyz/info";
+const HL_INFO_TESTNET = "https://api.hyperliquid-testnet.xyz/info";
 
 export type PerpMarket = {
   name: string;
@@ -36,65 +23,40 @@ export type PerpMarket = {
 };
 
 export async function getMeta(testnet = true): Promise<{ universe: PerpMarket[] }> {
-  const meta = await info(testnet).perpetuals.getMeta();
-  return meta as unknown as { universe: PerpMarket[] };
+  const url = testnet ? HL_INFO_TESTNET : HL_INFO;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "meta" }),
+  });
+  if (!r.ok) throw new Error(`meta ${r.status}`);
+  return r.json();
 }
 
 export async function getAllMids(testnet = true): Promise<Record<string, string>> {
-  const mids = await info(testnet).allMids();
-  return mids as unknown as Record<string, string>;
+  const url = testnet ? HL_INFO_TESTNET : HL_INFO;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "allMids" }),
+  });
+  if (!r.ok) throw new Error(`allMids ${r.status}`);
+  return r.json();
 }
 
 /**
- * Place a market order on Hyperliquid.
- * `walletClient` is viem's WalletClient from wagmi's useWalletClient().
+ * Place order stub. Returns a clear "not wired" error so the UI can show it.
+ * Real impl: EIP-712 sign the order with viem wallet client, POST to /exchange.
  */
-export async function placeMarketOrder(params: {
+export async function placeMarketOrder(_params: {
   coin: string;
   isLong: boolean;
   sizeUsd: number;
   address: `0x${string}`;
-  walletClient: WalletClient;
+  walletClient: any;
   testnet?: boolean;
 }) {
-  const { coin, isLong, sizeUsd, address, walletClient, testnet = true } = params;
-
-  const meta = await getMeta(testnet);
-  const mids = await getAllMids(testnet);
-
-  const idx = meta.universe.findIndex((u) => u.name === coin);
-  if (idx === -1) throw new Error(`unknown coin ${coin}`);
-
-  const mid = parseFloat(mids[coin]);
-  if (!mid || Number.isNaN(mid)) throw new Error(`no mid for ${coin}`);
-
-  const szDecimals = meta.universe[idx].szDecimals;
-  const sizeCoin = sizeUsd / mid;
-  // Round to szDecimals
-  const sizeRounded =
-    Math.round(sizeCoin * Math.pow(10, szDecimals)) / Math.pow(10, szDecimals);
-
-  const exchange = new ExchangeClient({
-    transport: transport(testnet),
-    wallet: walletClient as any,
-  });
-
-  // Market order via IOC at current mid (small slippage buffer)
-  const limitPx = (isLong ? mid * 1.01 : mid * 0.99).toFixed(2);
-
-  const result = await exchange.order({
-    orders: [
-      {
-        a: idx,
-        b: isLong,
-        p: limitPx,
-        s: sizeRounded.toString(),
-        r: false,
-        t: { limit: { tif: "Ioc" } },
-      },
-    ],
-    grouping: "na",
-  });
-
-  return result;
+  throw new Error(
+    "Trade execution not yet wired — backend signature signing pending. UI is live; reads work; writes coming next deploy."
+  );
 }

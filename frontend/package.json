@@ -8,7 +8,6 @@
     "start": "next start"
   },
   "dependencies": {
-    "@nktkas/hyperliquid": "^0.33.3",
     "@rainbow-me/rainbowkit": "^2.1.7",
     "@solana/wallet-adapter-base": "^0.9.23",
     "@solana/wallet-adapter-react": "^0.15.35",
