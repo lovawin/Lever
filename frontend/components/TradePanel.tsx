@@ -58,7 +58,6 @@ export default function TradePanel() {
         coin,
         isLong: side === "long",
         sizeUsd,
-        leverage,
         address,
         walletClient,
         testnet: true,

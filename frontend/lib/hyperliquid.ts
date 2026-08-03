@@ -1,38 +1,32 @@
 /**
- * Hyperliquid client wrapper.
+ * Hyperliquid SDK wrapper.
  *
- * Uses @nktkas/hyperliquid — the community-maintained TS SDK.
- * Supports read endpoints (no auth) and write endpoints (signed EIP-712).
+ * Uses @nktkas/hyperliquid v0.33 — InfoClient + ExchangeClient.
  *
- * For the frontend MVP, we:
- *   - Read market meta (universe of perps)
- *   - Read all mid prices
- *   - Read user state (positions, fills)
- *   - Place market orders (long/short) — requires a signer (wallet)
+ * Read endpoints (no auth): meta, allMids, l2Book
+ * Write endpoints (signed): order placement via ExchangeClient
  *
- * Write operations need a private key. NEVER ship private keys to the browser.
- * The frontend should:
- *   1. Build the unsigned order client-side
- *   2. Pass to wallet for signing via wagmi's useWalletClient() (MetaMask) or
- *      window.solana.signMessage? (no — HL is EVM only)
- *
- * Hyperliquid only supports EVM wallets (MetaMask, Rabby, etc.) for signing.
- * Solana users would need to bridge — out of scope for MVP.
+ * For trading, we pass viem's WalletClient from wagmi's useWalletClient() hook.
+ * Signing happens in the user's wallet (MetaMask, Rabby, etc.) — never on our server.
  */
 
-import { Hyperliquid } from "@nktkas/hyperliquid";
+import {
+  HttpTransport,
+  InfoClient,
+  ExchangeClient,
+} from "@nktkas/hyperliquid";
+import type { WalletClient } from "viem";
 
-// Public read-only client (no signer = no write capability)
-export const hl = new Hyperliquid({
-  serverUrl: "https://api.hyperliquid.xyz",
-  testnet: false,
-});
+const HL_MAINNET = "https://api.hyperliquid.xyz";
+const HL_TESTNET = "https://api.hyperliquid-testnet.xyz";
 
-// Testnet client (paper trading — recommended for MVP)
-export const hlTest = new Hyperliquid({
-  serverUrl: "https://api.hyperliquid.xyz",
-  testnet: true,
-});
+function transport(testnet = false) {
+  return new HttpTransport({ serverUrl: testnet ? HL_TESTNET : HL_MAINNET });
+}
+
+function info(testnet = false) {
+  return new InfoClient({ transport: transport(testnet) });
+}
 
 export type PerpMarket = {
   name: string;
@@ -41,75 +35,62 @@ export type PerpMarket = {
   marginTableId: number;
 };
 
-export async function getMeta(testnet = false): Promise<{ universe: PerpMarket[] }> {
-  const client = testnet ? hlTest : hl;
-  const meta = await client.info.perpetuals.getMeta();
+export async function getMeta(testnet = true): Promise<{ universe: PerpMarket[] }> {
+  const meta = await info(testnet).perpetuals.getMeta();
   return meta as unknown as { universe: PerpMarket[] };
 }
 
-export async function getAllMids(testnet = false): Promise<Record<string, string>> {
-  const client = testnet ? hlTest : hl;
-  const mids = await client.info.getAllMids();
+export async function getAllMids(testnet = true): Promise<Record<string, string>> {
+  const mids = await info(testnet).allMids();
   return mids as unknown as Record<string, string>;
 }
 
 /**
- * Get user's perp state (positions, margin, etc.)
- * Address is the EVM address (0x...).
- */
-export async function getUserState(address: string, testnet = false) {
-  const client = testnet ? hlTest : hl;
-  return await client.info.perpetuals.getUserState({ user: address as `0x${string}` });
-}
-
-/**
- * Place a market order.
- * Requires a connected wallet signer (passed in).
- *
- * For MVP: limit-style market order using IOC + market price.
+ * Place a market order on Hyperliquid.
+ * `walletClient` is viem's WalletClient from wagmi's useWalletClient().
  */
 export async function placeMarketOrder(params: {
   coin: string;
   isLong: boolean;
-  sizeUsd: number; // notional size in USD
-  leverage: number;
+  sizeUsd: number;
   address: `0x${string}`;
-  // walletClient from wagmi's useWalletClient()
-  walletClient: any;
+  walletClient: WalletClient;
   testnet?: boolean;
 }) {
-  const { coin, isLong, sizeUsd, leverage, address, walletClient, testnet = false } = params;
+  const { coin, isLong, sizeUsd, address, walletClient, testnet = true } = params;
 
-  // Get current mid price for the coin
+  const meta = await getMeta(testnet);
   const mids = await getAllMids(testnet);
+
+  const idx = meta.universe.findIndex((u) => u.name === coin);
+  if (idx === -1) throw new Error(`unknown coin ${coin}`);
+
   const mid = parseFloat(mids[coin]);
-  if (!mid || Number.isNaN(mid)) {
-    throw new Error(`no mid price for ${coin}`);
-  }
+  if (!mid || Number.isNaN(mid)) throw new Error(`no mid for ${coin}`);
 
-  // Size in coin units (e.g. number of HYPE tokens)
+  const szDecimals = meta.universe[idx].szDecimals;
   const sizeCoin = sizeUsd / mid;
+  // Round to szDecimals
+  const sizeRounded =
+    Math.round(sizeCoin * Math.pow(10, szDecimals)) / Math.pow(10, szDecimals);
 
-  // Hyperliquid wants the wallet signer wrapped properly
-  const transport = testnet
-    ? hlTest.config.transport
-    : hl.config.transport;
-
-  const client = new Hyperliquid({
-    serverUrl: testnet ? "https://api.hyperliquid.xyz" : "https://api.hyperliquid.xyz",
-    testnet,
-    walletClient, // SDK uses viem wallet client for signing
+  const exchange = new ExchangeClient({
+    transport: transport(testnet),
+    wallet: walletClient as any,
   });
 
-  const result = await client.exchange.placeOrder({
+  // Market order via IOC at current mid (small slippage buffer)
+  const limitPx = (isLong ? mid * 1.01 : mid * 0.99).toFixed(2);
+
+  const result = await exchange.order({
     orders: [
       {
-        coin,
-        isLong,
-        sz: sizeCoin,
-        limitPx: mid, // market = use current mid (cross/slippage handled by HL)
-        orderType: { limit: { tif: "Ioc" } }, // IOC = market-like
-        reduceOnly: false,
+        a: idx,
+        b: isLong,
+        p: limitPx,
+        s: sizeRounded.toString(),
+        r: false,
+        t: { limit: { tif: "Ioc" } },
       },
     ],
     grouping: "na",
