@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lever-signals
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: "cd backend && pip install -r requirements.txt"
+    startCommand: "cd backend && uvicorn app.main:app --host 0.0.0.0 --port 10000"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
+      - key: CORS_ORIGIN
+        value: https://lever.vercel.app
+      - key: HL_INFO_URL
+        value: https://api.hyperliquid.xyz/info
