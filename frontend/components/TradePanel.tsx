@@ -1,10 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAccount, useWalletClient } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { Connection } from "@solana/web3.js";
 import { placeMarketOrder, getMeta, type PerpMarket } from "@/lib/hyperliquid";
-import { searchTokens, type TokenSearchResult, calculateLeverageMetrics, usdcToRaw, USDC_MINT } from "@/lib/leverage";
+import {
+  searchTokens,
+  type TokenSearchResult,
+  calculateLeverageMetrics,
+  openLeveragePosition,
+} from "@/lib/leverage";
 
 /** HL perp coins — these support real longs AND shorts */
 const HL_PERP_MEMECOINS = ["PURR", "HYPE", "WIF", "TRUMP", "kPEPE", "kBONK", "DOGE"];
@@ -14,7 +20,7 @@ type TradeMode = "perps" | "spot";
 export default function TradePanel({ mids }: { mids: Record<string, string> }) {
   const { address, isConnected: evmConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const { publicKey, connected: solConnected } = useWallet();
+  const { publicKey, connected: solConnected, signTransaction, sendTransaction } = useWallet();
 
   const [markets, setMarkets] = useState<PerpMarket[]>([]);
   const [mode, setMode] = useState<TradeMode>("perps");
@@ -72,18 +78,18 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
     return () => { alive = false; clearTimeout(timer); };
   }, [mode, tokenQuery]);
 
-  async function submit() {
+  const submit = useCallback(async () => {
     setBusy(true);
     setErr(null);
     setResult(null);
 
-    if (mode === "perps") {
-      if (!evmConnected || !address || !walletClient) {
-        setErr("Connect an EVM wallet (MetaMask/Rabby) for HL perps");
-        setBusy(false);
-        return;
-      }
-      try {
+    try {
+      if (mode === "perps") {
+        // ─── HL Perps ────────────────────────────────────────────────────
+        if (!evmConnected || !address || !walletClient) {
+          throw new Error("Connect an EVM wallet (MetaMask/Rabby) for HL perps");
+        }
+
         const r = await placeMarketOrder({
           coin,
           isLong: side === "long",
@@ -91,27 +97,67 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
           address,
           walletClient,
           testnet: true,
+          leverage: levCapped,
         });
-        setResult(JSON.stringify(r, null, 2).slice(0, 400));
-      } catch (e: any) {
-        setErr(e?.shortMessage ?? e?.message ?? String(e));
+
+        // Format result for display
+        const status = r.response?.data?.statuses?.[0];
+        if (status?.error) {
+          throw new Error(status.error);
+        }
+        const filled = status?.filled;
+        const resting = status?.resting;
+        if (filled) {
+          setResult(`✅ Filled: ${filled.totalSz} @ $${filled.avgPx} (oid: ${filled.oid})`);
+        } else if (resting) {
+          setResult(`📋 Resting order placed (oid: ${resting.oid})`);
+        } else {
+          setResult(`✅ Order sent: ${JSON.stringify(r).slice(0, 300)}`);
+        }
+      } else {
+        // ─── Spot Leverage ────────────────────────────────────────────────
+        if (!solConnected || !publicKey) {
+          throw new Error("Connect a Solana wallet (Phantom/Solflare) for spot leverage");
+        }
+        if (!selectedToken) {
+          throw new Error("Select a token to long");
+        }
+
+        const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+
+        // Get a wallet adapter that supports signTransaction
+        const walletAdapter = (window as any).solana;
+        if (!walletAdapter?.signTransaction) {
+          throw new Error("Wallet does not support transaction signing. Use Phantom or Solflare.");
+        }
+
+        const { signatures, steps } = await openLeveragePosition({
+          walletAddress: publicKey.toBase58(),
+          walletAdapter,
+          connection,
+          collateralUsd: sizeUsd,
+          leverage: levCapped,
+          targetMint: selectedToken.mint,
+          slippagePercent: 1,
+        });
+
+        setResult(
+          `✅ Spot leverage opened!\n${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\nTX: ${signatures.join(", ")}`
+        );
       }
-    } else {
-      if (!solConnected || !publicKey) {
-        setErr("Connect a Solana wallet (Phantom/Solflare) for spot leverage");
-        setBusy(false);
-        return;
+    } catch (e: any) {
+      const msg = e?.shortMessage ?? e?.message ?? String(e);
+      // Include partial progress if available
+      const steps = e?.steps;
+      if (steps?.length) {
+        setErr(`${msg}\n\nProgress:\n${steps.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
+      } else {
+        setErr(msg);
       }
-      if (!selectedToken) {
-        setErr("Select a token to long");
-        setBusy(false);
-        return;
-      }
-      // TODO: Call Kamino Blinks API + Jupiter swap
-      setErr("Spot leverage coming soon — Kamino + Jupiter integration in progress 🔧");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
-  }
+  }, [mode, coin, side, sizeUsd, levCapped, address, walletClient, evmConnected, solConnected, publicKey, selectedToken]);
 
   return (
     <div className="glass rounded-2xl p-6">
