@@ -15,10 +15,12 @@ import { clusterApiUrl } from "@solana/web3.js";
 import "@rainbow-me/rainbowkit/styles.css";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
-// EVM (Hyperliquid uses Arbitrum-style signing)
+// EVM wallet config — WalletConnect project ID (get yours at https://cloud.walletconnect.com)
+const WALLETCONNECT_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "lever-mvp-placeholder";
+
 const wagmiConfig = getDefaultConfig({
   appName: "Lever",
-  projectId: "lever-mvp-placeholder",
+  projectId: WALLETCONNECT_PROJECT_ID,
   chains: [mainnet, arbitrum],
   transports: {
     [mainnet.id]: http(),
@@ -27,7 +29,6 @@ const wagmiConfig = getDefaultConfig({
   ssr: true,
 });
 
-// Solana connection (used for any Solana-token features)
 const SOL_ENDPOINT = clusterApiUrl("mainnet-beta");
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -35,7 +36,6 @@ export function Providers({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Solana wallet adapters (Phantom + Solflare)
   const solanaWallets = useMemo(
     () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
     []
@@ -48,7 +48,10 @@ export function Providers({ children }: { children: ReactNode }) {
           <ConnectionProvider endpoint={SOL_ENDPOINT}>
             <WalletProvider wallets={solanaWallets} autoConnect>
               <WalletModalProvider>
-                {mounted ? children : null}
+                {/* Render children always; only hide hydration-sensitive wallet UI until mounted */}
+                <div style={{ visibility: mounted ? "visible" : "hidden" }}>
+                  {children}
+                </div>
               </WalletModalProvider>
             </WalletProvider>
           </ConnectionProvider>
