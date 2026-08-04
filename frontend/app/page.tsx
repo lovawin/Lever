@@ -51,7 +51,7 @@ export default function Page() {
       {/* Tagline */}
       <div className="mx-auto max-w-6xl w-full px-6 pt-8 pb-2">
         <h2 className="text-xl md:text-2xl font-bold">long the runner · short the rug</h2>
-        <p className="text-sm text-muted mt-1">Perp longs & shorts on Hyperliquid. Non-custodial — your wallet, your keys.</p>
+        <p className="text-sm text-muted mt-1">Perps on Hyperliquid · Spot leverage on Solana via Kamino + Jupiter. Non-custodial.</p>
       </div>
 
       {/* Main content — trade on left, positions on right */}
