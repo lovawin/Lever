@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useAccount, useWalletClient } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { placeMarketOrder, getMeta, type PerpMarket } from "@/lib/hyperliquid";
-import { searchTokens, type TokenSearchResult } from "@/lib/leverage";
+import { searchTokens, type TokenSearchResult, calculateLeverageMetrics, usdcToRaw, USDC_MINT } from "@/lib/leverage";
 
 /** HL perp coins — these support real longs AND shorts */
 const HL_PERP_MEMECOINS = ["PURR", "HYPE", "WIF", "TRUMP", "kPEPE", "kBONK", "DOGE"];
@@ -55,6 +55,7 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
   // Spot mode: no shorts, limited leverage
   const canShort = mode === "perps";
   const maxLev = mode === "perps" ? (market?.maxLeverage ?? 20) : 5;
+  const metrics = mode === "spot" ? calculateLeverageMetrics(sizeUsd, levCapped) : null;
 
   // Token search for spot mode
   useEffect(() => {
@@ -305,10 +306,16 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
             <span className="text-bear">${estLiquidation.toFixed(2)}</span>
           </div>
         )}
-        {mode === "spot" && (
+        {mode === "spot" && metrics && (
           <div className="flex justify-between text-bull">
             <span>Borrow</span>
-            <span>${(notional - sizeUsd).toFixed(2)} via Kamino</span>
+            <span>${metrics.borrowUsd.toFixed(2)} from Kamino</span>
+          </div>
+        )}
+        {mode === "spot" && metrics && (
+          <div className="flex justify-between text-bear">
+            <span>Liquidation</span>
+            <span>−{metrics.liquidationDropPct.toFixed(1)}% drop</span>
           </div>
         )}
       </div>

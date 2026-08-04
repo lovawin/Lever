@@ -265,3 +265,120 @@ async def signals_batch(mints: str):
         if sig:
             out.append(sig.model_dump())
     return {"count": len(out), "signals": out}
+
+
+# ─── Kamino Leverage API ────────────────────────────────────────────────────
+# Proxies to Kamino Dialect/Blinks API for leveraged positions.
+# Two-step flow: setup (create obligation) → openPosition (deposit + borrow)
+
+KAMINO_DIALECT = "https://kamino.dial.to/api"
+KAMINO_REST = "https://api.kamino.finance"
+KAMINO_MAIN_MARKET = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF"
+USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+SOL_MINT = "So11111111111111111111111111111111111111112"
+
+
+class KaminoSetupRequest(BaseModel):
+    wallet: str  # base58 pubkey
+    market: str = KAMINO_MAIN_MARKET
+    collTokenMint: str = SOL_MINT
+    debtTokenMint: str = USDC_MINT
+
+
+class KaminoLeverageRequest(BaseModel):
+    wallet: str  # base58 pubkey
+    market: str = KAMINO_MAIN_MARKET
+    collTokenMint: str = SOL_MINT
+    debtTokenMint: str = USDC_MINT
+    leverage: float = 2.0  # 1.1 to 10
+    amount: float = 0.1  # human-readable deposit amount
+    slippage: float = 1.0  # 0.1 to 10%
+
+
+@app.post("/kamino/setup")
+async def kamino_setup(req: KaminoSetupRequest):
+    """Create a Kamino obligation account for leveraged positions.
+    Returns a base64 transaction for wallet signing."""
+    url = (
+        f"{KAMINO_DIALECT}/v0/leverage/{req.market}/setup"
+        f"?collTokenMint={req.collTokenMint}"
+        f"&debtTokenMint={req.debtTokenMint}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(url, json={"type": "transaction", "account": req.wallet})
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"Kamino setup error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(500, f"Kamino setup failed: {e}")
+
+
+@app.post("/kamino/open-position")
+async def kamino_open_position(req: KaminoLeverageRequest):
+    """Open a leveraged position via Kamino Dialect/Blinks API.
+    Returns a base64 transaction for wallet signing.
+    NOTE: User must have called /setup first."""
+    url = (
+        f"{KAMINO_DIALECT}/v0/leverage/{req.market}/openPosition"
+        f"?collTokenMint={req.collTokenMint}"
+        f"&debtTokenMint={req.debtTokenMint}"
+        f"&leverage={req.leverage}"
+        f"&amount={req.amount}"
+        f"&slippage={req.slippage}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(url, json={"type": "transaction", "account": req.wallet})
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"Kamino leverage error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(500, f"Kamino leverage failed: {e}")
+
+
+@app.get("/kamino/markets")
+async def kamino_markets():
+    """List available Kamino lending markets."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{KAMINO_REST}/v2/kamino-market")
+            r.raise_for_status()
+            return r.json()
+    except Exception as e:
+        raise HTTPException(500, f"Kamino markets error: {e}")
+
+
+# ─── Jupiter Swap Proxy ────────────────────────────────────────────────────
+# Proxies Jupiter quote API to avoid CORS issues from the browser.
+# For swap transactions, we use the v2 /build endpoint which returns raw
+# instructions that can be composed with lending operations.
+
+JUPITER_QUOTE = "https://quote-api.jup.ag"
+
+
+@app.get("/jupiter/quote")
+async def jupiter_quote(
+    inputMint: str,
+    outputMint: str,
+    amount: int,
+    slippageBps: int = 100,
+):
+    """Get a Jupiter swap quote. Amount is in smallest unit (lamports for SOL, raw for USDC)."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            params = {
+                "inputMint": inputMint,
+                "outputMint": outputMint,
+                "amount": str(amount),
+                "slippageBps": str(slippageBps),
+            }
+            r = await client.get(f"{JUPITER_QUOTE}/v6/quote", params=params)
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"Jupiter quote error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(500, f"Jupiter quote failed: {e}")
