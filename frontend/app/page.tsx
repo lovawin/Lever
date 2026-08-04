@@ -1,33 +1,78 @@
+"use client";
+
 import WalletBar from "@/components/WalletBar";
 import TradePanel from "@/components/TradePanel";
 import PositionsPanel from "@/components/PositionsPanel";
+import MarketTicker from "@/components/MarketTicker";
+import { useEffect, useState } from "react";
+import { getAllMids } from "@/lib/hyperliquid";
 
 export default function Page() {
+  const [mids, setMids] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const m = await getAllMids(true);
+        if (alive) setMids(m);
+      } catch {}
+    })();
+    const iv = setInterval(async () => {
+      try {
+        const m = await getAllMids(true);
+        if (alive) setMids(m);
+      } catch {}
+    }, 15_000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+
   return (
-    <main className="mx-auto max-w-2xl px-4 py-8 md:py-16">
-      <header className="flex items-start justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-5xl md:text-6xl font-black tracking-tight">
-            Lever<span className="text-bull">.</span>
-          </h1>
-          <p className="text-muted mt-1 text-base md:text-lg">long the runner · short the rug</p>
-        </div>
-        <div className="pt-2">
+    <div className="min-h-screen hero-gradient">
+      {/* Live price ticker */}
+      <MarketTicker mids={mids} />
+
+      {/* Header */}
+      <header className="border-b border-white/5">
+        <div className="mx-auto max-w-5xl flex items-center justify-between px-4 py-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl md:text-3xl font-black tracking-tight">
+              Lever<span className="text-bull">.</span>
+            </h1>
+            <div className="hidden sm:flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-bull pulse-dot" />
+              <span className="text-[10px] uppercase tracking-widest text-muted">Live</span>
+            </div>
+          </div>
           <WalletBar />
         </div>
       </header>
 
-      <p className="text-muted text-sm leading-relaxed mb-6">
-        Perp longs and shorts on Hyperliquid. Non-custodial — EVM wallet signs trades,
-        Solana wallet for token-gated features later.
-      </p>
+      {/* Hero tagline — mobile only */}
+      <div className="sm:hidden px-4 pt-4">
+        <p className="text-lg font-bold">long the runner · short the rug</p>
+        <p className="text-xs text-muted mt-1">Perp longs/shorts on Hyperliquid. Non-custodial.</p>
+      </div>
 
-      <TradePanel />
-      <PositionsPanel />
+      {/* Main content */}
+      <main className="mx-auto max-w-5xl px-4 py-6 grid grid-cols-1 lg:grid-cols-5 gap-6">
+        {/* Trade panel — left */}
+        <div className="lg:col-span-2">
+          <TradePanel mids={mids} />
+        </div>
+        {/* Positions — right */}
+        <div className="lg:col-span-3">
+          <PositionsPanel />
+        </div>
+      </main>
 
-      <footer className="mt-12 text-center text-xs text-muted">
-        Hyperliquid testnet · MVP · not financial advice
+      {/* Footer */}
+      <footer className="border-t border-white/5 mt-8">
+        <div className="mx-auto max-w-5xl px-4 py-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+          <span>Hyperliquid testnet · MVP · not financial advice</span>
+          <span>Built with 🔥</span>
+        </div>
       </footer>
-    </main>
+    </div>
   );
 }
