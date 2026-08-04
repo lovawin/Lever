@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useAccount, useWalletClient } from "wagmi";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { placeMarketOrder, getMeta, type PerpMarket } from "@/lib/hyperliquid";
+import { searchTokens, type TokenSearchResult } from "@/lib/leverage";
 
 /** HL perp coins — these support real longs AND shorts */
 const HL_PERP_MEMECOINS = ["PURR", "HYPE", "WIF", "TRUMP", "kPEPE", "kBONK", "DOGE"];
@@ -24,6 +25,10 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [tokenQuery, setTokenQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<TokenSearchResult[]>([]);
+  const [selectedToken, setSelectedToken] = useState<TokenSearchResult | null>(null);
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -51,6 +56,21 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
   const canShort = mode === "perps";
   const maxLev = mode === "perps" ? (market?.maxLeverage ?? 20) : 5;
 
+  // Token search for spot mode
+  useEffect(() => {
+    if (mode !== "spot" || tokenQuery.length < 2) { setSearchResults([]); return; }
+    let alive = true;
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const results = await searchTokens(tokenQuery);
+        if (alive) setSearchResults(results);
+      } catch { /* ignore */ }
+      finally { if (alive) setSearching(false); }
+    }, 300);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [mode, tokenQuery]);
+
   async function submit() {
     setBusy(true);
     setErr(null);
@@ -76,12 +96,17 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
         setErr(e?.shortMessage ?? e?.message ?? String(e));
       }
     } else {
-      // Spot leverage mode
       if (!solConnected || !publicKey) {
         setErr("Connect a Solana wallet (Phantom/Solflare) for spot leverage");
         setBusy(false);
         return;
       }
+      if (!selectedToken) {
+        setErr("Select a token to long");
+        setBusy(false);
+        return;
+      }
+      // TODO: Call Kamino Blinks API + Jupiter swap
       setErr("Spot leverage coming soon — Kamino + Jupiter integration in progress 🔧");
     }
     setBusy(false);
@@ -181,16 +206,52 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
       ) : (
         <>
           <label className="block text-[10px] uppercase tracking-widest text-muted mb-1.5">Token</label>
-          <div className="flex gap-2">
+          <div className="relative">
             <input
               type="text"
-              placeholder="Paste mint address or search…"
-              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-bull/50 placeholder:text-muted/50"
+              value={tokenQuery}
+              onChange={(e) => { setTokenQuery(e.target.value); setSelectedToken(null); }}
+              placeholder="Search by name or paste mint address…"
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-bull/50 placeholder:text-muted/50"
             />
-            <button className="px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-muted hover:text-white hover:bg-white/10 transition-colors">
-              🔍
-            </button>
+            {searching && (
+              <div className="absolute right-3 top-3.5 text-xs text-muted animate-pulse">Searching…</div>
+            )}
           </div>
+          {/* Search results dropdown */}
+          {searchResults.length > 0 && !selectedToken && (
+            <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-panel shadow-xl">
+              {searchResults.map((t) => (
+                <button
+                  key={t.mint}
+                  onClick={() => { setSelectedToken(t); setTokenQuery(`${t.symbol} — ${t.name}`); }}
+                  className="w-full text-left px-4 py-2.5 hover:bg-white/5 flex items-center gap-3 border-b border-white/5 last:border-0"
+                >
+                  {t.logoUri && <img src={t.logoUri} alt="" className="w-5 h-5 rounded-full" />}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold truncate">{t.symbol}</div>
+                    <div className="text-[10px] text-muted truncate">{t.name}</div>
+                  </div>
+                  <div className="text-right text-[10px]">
+                    {t.priceUsd != null && <div className="text-bull font-mono">${t.priceUsd < 0.01 ? t.priceUsd.toPrecision(3) : t.priceUsd.toFixed(2)}</div>}
+                    {t.volume24h != null && <div className="text-muted">Vol: ${(t.volume24h / 1e6).toFixed(1)}M</div>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Selected token badge */}
+          {selectedToken && (
+            <div className="mt-2 flex items-center gap-2 bg-bull/10 border border-bull/20 rounded-lg px-3 py-2">
+              {selectedToken.logoUri && <img src={selectedToken.logoUri} alt="" className="w-4 h-4 rounded-full" />}
+              <span className="text-sm font-bold">{selectedToken.symbol}</span>
+              <span className="text-[10px] text-muted">{selectedToken.name}</span>
+              {selectedToken.priceUsd != null && (
+                <span className="text-[10px] text-bull font-mono ml-auto">${selectedToken.priceUsd < 0.01 ? selectedToken.priceUsd.toPrecision(3) : selectedToken.priceUsd.toFixed(2)}</span>
+              )}
+              <button onClick={() => { setSelectedToken(null); setTokenQuery(""); }} className="text-muted hover:text-white ml-1">✕</button>
+            </div>
+          )}
           <div className="text-xs text-muted mt-1 mb-4 font-mono">
             Any Solana token — powered by DexScreener + Jupiter
           </div>
@@ -264,7 +325,9 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
       >
         {busy ? "Processing…" : mode === "perps"
           ? `${side.toUpperCase()} ${coin} ${levCapped}x · $${sizeUsd}`
-          : `LONG $${notional.toFixed(0)} · $${sizeUsd} collateral`
+          : selectedToken
+            ? `LONG ${selectedToken.symbol} ${levCapped}x · $${notional.toFixed(0)}`
+            : "Select a token to long"
         }
       </button>
 

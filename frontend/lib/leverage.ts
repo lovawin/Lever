@@ -1,150 +1,251 @@
 /**
- * Jupiter Aggregator + Kamino Lending integration for leveraged spot longs.
+ * Leveraged spot longs on Solana — Kamino + Jupiter integration.
  *
- * Flow:
- * 1. User deposits USDC as collateral → Kamino lending pool
- * 2. Borrow more USDC against that collateral (leverage multiplier)
- * 3. Swap borrowed + original USDC through Jupiter for target token
- * 4. Show leveraged position in UI
+ * Architecture:
+ *   1. User deposits USDC as collateral into Kamino lending
+ *   2. Borrows more USDC (leverage multiplier)
+ *   3. Swaps borrowed + original USDC → meme token via Jupiter
+ *   4. All atomic via flash loan: start → deposit → borrow → swap → end
  *
- * This file provides:
- *   - Jupiter v6 swap quote + transaction building
- *   - Kamino lending pool deposit + borrow
- *   - Composite "one-click leverage" transaction assembly
+ * The meme token goes to the user's wallet (can't be lending collateral).
+ * The lending position is USDC collateral / USDC debt.
  *
- * Status: STUB — needs real implementation once research is complete
+ * Two implementation paths:
+ *   A) Kamino Dialect/Blinks API (simplest — one REST call)
+ *   B) Custom composable tx (P0/MarginFi flash loan + Jupiter Router /build)
+ *
+ * Path A is what we'll ship first.
  */
 
-import { PublicKey, Transaction, VersionedTransaction } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 
-// ─── Types ──────────────────────────────────────────────────────────────
-
-export type LeverageQuote = {
-  inputMint: string;      // USDC mint
-  outputMint: string;     // Target token mint
-  collateralUsd: number;  // User's collateral
-  leverage: number;       // 2x-5x
-  borrowUsd: number;      // Amount borrowed from Kamino
-  totalUsd: number;       // Total position size
-  swapRoute?: JupiterRoute; // Jupiter swap route info
-};
-
-export type JupiterRoute = {
-  inAmount: string;
-  outAmount: string;
-  priceImpactPct: number;
-  marketInfos: Array<{
-    id: string;
-    label: string;
-    inputMint: string;
-    outputMint: string;
-  }>;
-};
-
-export type KaminoPosition = {
-  collateralUsd: number;
-  borrowedUsd: number;
-  healthFactor: number; // >1 = healthy, <1 = liquidatable
-  leveragedToken: string;
-  leveragedAmount: number;
-  entryPrice: number;
-  liquidationPrice: number;
-};
-
-// ─── Constants ──────────────────────────────────────────────────────────
+// ─── Constants ───────────────────────────────────────────────────────────
 
 export const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
-export const KAMINO_LENDING_PROGRAM_ID = new PublicKey("KLend2g3cU87JEaLNMJjXps7JjkFVRjs4TRsVj5mLzA"); // placeholder — verify
+export const SOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 
-const JUPITER_API = "https://quote-api.jup.ag/v6";
-const HELIUS_RPC = process.env.NEXT_PUBLIC_HELIUS_RPC ?? "https://api.mainnet-beta.solana.com";
+/** Kamino main market */
+export const KAMINO_MAIN_MARKET = new PublicKey("7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF");
 
-// ─── Jupiter Swap ───────────────────────────────────────────────────────
+/** marginfi v2 program */
+export const MARGINFI_PROGRAM = new PublicKey("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
 
-/** Get a swap quote from Jupiter v6 */
-export async function getJupiterQuote(params: {
+// ─── Types ───────────────────────────────────────────────────────────────
+
+export type LeverageMode = "perps" | "spot";
+
+export interface LeverageQuote {
+  /** Collateral amount (what user deposits) */
+  collateralUsd: number;
+  /** Leverage multiplier (2-5x for spot, up to 20x for perps) */
+  leverage: number;
+  /** Total position size (collateral * leverage) */
+  notionalUsd: number;
+  /** Amount borrowed from lending protocol */
+  borrowUsd: number;
+  /** Target token mint address */
+  targetMint: string;
+  /** Estimated slippage in % */
+  estimatedSlippage: number;
+  /** Estimated liquidation price (USDC debt / collateral LTV) */
+  estimatedLiquidationPrice: number;
+  /** Which implementation path to use */
+  implementation: "kamino-blinks" | "custom-compose";
+}
+
+export interface KaminoLeverageRequest {
+  marketAddress: string;      // Kamino market pubkey
+  collTokenMint: string;      // USDC mint
+  debtTokenMint: string;      // USDC mint (borrowing same asset)
+  leverage: number;            // 1.1 - 10
+  amount: number;              // Human-readable deposit amount
+  slippage: number;            // 0.1 - 10%
+  account: string;             // Wallet pubkey (base58)
+}
+
+export interface JupiterQuoteParams {
   inputMint: string;
   outputMint: string;
-  amount: number;        // in lamports (for SOL) or raw units
-  slippageBps?: number;  // default 100 = 1%
-}): Promise<JupiterRoute> {
-  const url = new URL(`${JUPITER_API}/quote`);
+  amount: number;             // In smallest unit (lamports for SOL, raw for USDC)
+  slippageBps?: number;       // Default 100 = 1%
+}
+
+// ─── Kamino Dialect/Blinks API ───────────────────────────────────────────
+// This is the easiest path — one REST call returns a fully assembled tx.
+// POST https://kamino.dial.to/api/v0/leverage/{marketAddress}/openPosition
+
+const KAMINO_DIALECT_API = "https://kamino.dial.to/api";
+
+/**
+ * Open a leveraged position via Kamino's Blinks API.
+ * Returns a base64-encoded VersionedTransaction for wallet signing.
+ *
+ * Note: This creates a USDC collateral / USDC debt position.
+ * The meme token swap happens SEPARATELY via Jupiter after the
+ * position is opened (not fully atomic — see custom compose for that).
+ */
+export async function openKaminoLeveragePosition(
+  params: KaminoLeverageRequest
+): Promise<string> {
+  const url = new URL(
+    `${KAMINO_DIALECT_API}/v0/leverage/${params.marketAddress}/openPosition`
+  );
+  url.searchParams.set("collTokenMint", params.collTokenMint);
+  url.searchParams.set("debtTokenMint", params.debtTokenMint);
+  url.searchParams.set("leverage", String(params.leverage));
+  url.searchParams.set("amount", String(params.amount));
+  url.searchParams.set("slippage", String(params.slippage));
+
+  const r = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "transaction",
+      account: params.account,
+    }),
+  });
+
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`Kamino leverage API error ${r.status}: ${text}`);
+  }
+
+  const data = await r.json();
+  return data.transaction; // base64-encoded VersionedTransaction
+}
+
+// ─── Jupiter Swap API (v2) ───────────────────────────────────────────────
+// Used for swapping borrowed USDC → meme token.
+// Meta-Aggregator (/order + /execute) for simple swaps.
+// Router (/build) for composable instructions in flash loan txs.
+
+const JUPITER_API_V2 = "https://api.jup.ag/swap/v2";
+const JUPITER_LITE_API = "https://lite-api.jup.ag/swap/v1";
+
+/** USDC has 6 decimals */
+export function usdcToRaw(amount: number): number {
+  return Math.round(amount * 1_000_000);
+}
+
+/**
+ * Get a Jupiter swap quote (v2 Meta-Aggregator).
+ * Requires API key: https://developers.jup.ag/portal
+ */
+export async function getJupiterQuote(
+  params: JupiterQuoteParams,
+  apiKey: string
+): Promise<any> {
+  const url = new URL(`${JUPITER_API_V2}/order`);
   url.searchParams.set("inputMint", params.inputMint);
   url.searchParams.set("outputMint", params.outputMint);
   url.searchParams.set("amount", String(params.amount));
-  url.searchParams.set("slippageBps", String(params.slippageBps ?? 100));
+  url.searchParams.set("taker", params.outputMint); // placeholder — real wallet address needed
 
-  const r = await fetch(url.toString());
+  const r = await fetch(url.toString(), {
+    headers: { "x-api-key": apiKey },
+  });
   if (!r.ok) throw new Error(`Jupiter quote failed: ${r.status}`);
   return r.json();
 }
 
-/** Build a Jupiter swap transaction (returns base64 serialized tx) */
-export async function getJupiterSwapTx(params: {
-  quoteResponse: JupiterRoute;
-  userPublicKey: string;
-  priorityFeeLamports?: number;
-}): Promise<string> {
-  const r = await fetch(`${JUPITER_API}/swap`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      quoteResponse: params.quoteResponse,
-      userPublicKey: params.userPublicKey,
-      priorityFeeLamports: params.priorityFeeLamports ?? 0,
-      dynamicComputeUnitLimit: true,
-    }),
+/**
+ * Get Jupiter swap instructions for composable transactions.
+ * Returns raw instructions that can be combined with lending ops.
+ */
+export async function getJupiterSwapInstructions(
+  params: JupiterQuoteParams & { userPublicKey: string },
+  apiKey: string
+): Promise<any> {
+  const url = new URL(`${JUPITER_API_V2}/build`);
+  url.searchParams.set("inputMint", params.inputMint);
+  url.searchParams.set("outputMint", params.outputMint);
+  url.searchParams.set("amount", String(params.amount));
+  url.searchParams.set("taker", params.userPublicKey);
+
+  const r = await fetch(url.toString(), {
+    headers: { "x-api-key": apiKey },
   });
-  if (!r.ok) throw new Error(`Jupiter swap tx failed: ${r.status}`);
-  const data = await r.json();
-  return data.swapTransaction; // base64
+  if (!r.ok) throw new Error(`Jupiter build failed: ${r.status}`);
+  return r.json();
 }
 
-// ─── Kamino Lending ─────────────────────────────────────────────────────
+// ─── Composite: One-Click Leverage ───────────────────────────────────────
+// The full flow for true one-click leveraged longs:
+//   1. Flash loan start (borrow USDC)
+//   2. Deposit user USDC + flash-borrowed USDC as collateral
+//   3. Borrow USDC against collateral
+//   4. Jupiter swap: borrowed USDC → meme token
+//   5. Flash loan end (health check)
+//
+// This requires building a custom VersionedTransaction with:
+//   - P0/MarginFi flash loan instructions
+//   - Jupiter Router /build swap instructions
+//   - Address lookup tables for transaction size efficiency
+//
+// Status: NOT YET IMPLEMENTED — requires:
+//   - @0dotxyz/p0-ts-sdk for lending + flash loan
+//   - Jupiter API key
+//   - Wallet signing flow
 
-/**
- * Build a Kamino deposit + borrow instruction set.
- * This will be composed with the Jupiter swap into a single transaction.
- *
- * Status: STUB — needs real program instruction building once we have
- * Kamino's actual IDL and program addresses.
- */
-export async function buildKaminoLeverageIx(params: {
-  userPublicKey: PublicKey;
-  collateralAmount: number;  // USDC amount in raw units (6 decimals)
-  borrowAmount: number;      // USDC amount to borrow in raw units
-  leverage: number;
-}): Promise<{ depositIx: any[]; borrowIx: any[] }> {
-  // TODO: Build real Kamino instructions
-  // 1. Create/derive obligation PDA for user
-  // 2. Deposit USDC collateral instruction
-  // 3. Borrow USDC instruction
-  // 4. Return instructions for composition with Jupiter swap
-
-  throw new Error(
-    "Kamino leverage integration not yet wired — research in progress 🔧"
-  );
-}
-
-// ─── Composite: One-Click Leverage ──────────────────────────────────────
-
-/**
- * The full flow:
- * 1. Kamino deposit USDC
- * 2. Kamino borrow USDC
- * 3. Jupiter swap borrowed + original USDC → target token
- * 4. Return signed transaction for user to approve
- *
- * Status: STUB
- */
-export async function buildLeveragedLongTx(params: {
+export async function buildLeveragedLongTx(_params: {
   userPublicKey: PublicKey;
   collateralUsd: number;
-  leverage: number;       // 2-5
+  leverage: number;
   targetTokenMint: string;
   slippageBps?: number;
-}): Promise<VersionedTransaction> {
+}): Promise<never> {
   throw new Error(
-    "One-click leverage not yet wired — Kamino + Jupiter integration in progress 🔧"
+    "One-click leverage not yet wired. Kamino Blinks API + Jupiter swap integration in progress. 🔧"
   );
+}
+
+// ─── Search: Token lookup for spot mode ───────────────────────────────────
+
+export interface TokenSearchResult {
+  mint: string;
+  symbol: string;
+  name: string;
+  logoUri?: string;
+  priceUsd?: number;
+  volume24h?: number;
+  liquidity?: number;
+}
+
+/**
+ * Search for tokens by name/symbol using Jupiter token list or DexScreener.
+ * Returns candidates for the spot leverage token picker.
+ */
+export async function searchTokens(query: string): Promise<TokenSearchResult[]> {
+  // Use DexScreener search (already integrated in backend)
+  const r = await fetch(
+    `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query)}`
+  );
+  if (!r.ok) return [];
+
+  const data = await r.json();
+  const pairs = data.pairs ?? [];
+
+  // Deduplicate by baseToken address, sort by volume
+  const seen = new Set<string>();
+  const results: TokenSearchResult[] = [];
+
+  for (const p of pairs) {
+    const mint = p.baseToken?.address;
+    if (!mint || seen.has(mint)) continue;
+    seen.add(mint);
+
+    results.push({
+      mint,
+      symbol: p.baseToken?.symbol ?? "???",
+      name: p.baseToken?.name ?? p.baseToken?.symbol ?? "Unknown",
+      logoUri: p.baseToken?.logoUri,
+      priceUsd: parseFloat(p.priceUsd ?? "0") || undefined,
+      volume24h: parseFloat(p.volume?.h24 ?? "0") || undefined,
+      liquidity: parseFloat(p.liquidity?.usd ?? "0") || undefined,
+    });
+  }
+
+  // Sort by volume (most traded first)
+  results.sort((a, b) => (b.volume24h ?? 0) - (a.volume24h ?? 0));
+  return results.slice(0, 20);
 }
