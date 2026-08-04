@@ -71,13 +71,12 @@ export default function PositionsPanel() {
     return () => { alive = false; clearInterval(iv); };
   }, [address, isConnected]);
 
-  // Not connected — empty state
   if (!isConnected) {
     return (
-      <div className="glass rounded-2xl p-6 flex flex-col items-center justify-center text-center min-h-[300px]">
-        <div className="text-4xl mb-4">🔑</div>
+      <div className="glass rounded-2xl p-8 flex flex-col items-center justify-center text-center min-h-[300px]">
+        <div className="text-5xl mb-4">🔑</div>
         <h3 className="text-lg font-bold mb-2">Connect Your Wallet</h3>
-        <p className="text-sm text-muted max-w-xs">
+        <p className="text-sm text-muted max-w-sm">
           Connect an EVM wallet (MetaMask, Rabby) to see your Hyperliquid testnet positions and trade history.
         </p>
       </div>
@@ -90,7 +89,7 @@ export default function PositionsPanel() {
   const withdrawable = parseFloat(state?.withdrawable ?? "0");
 
   return (
-    <div className="glass rounded-2xl p-5">
+    <div className="glass rounded-2xl p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold">Account</h2>
@@ -101,20 +100,20 @@ export default function PositionsPanel() {
       </div>
 
       {err && (
-        <div className="text-xs text-bear font-mono mb-3 p-3 bg-bear/10 rounded-xl">{err}</div>
+        <div className="text-xs text-bear font-mono mb-4 p-3 bg-bear/10 rounded-xl">{err}</div>
       )}
 
       {/* Account summary cards */}
       <div className="grid grid-cols-3 gap-3 mb-6">
-        <div className="bg-white/5 rounded-xl p-3">
+        <div className="bg-white/5 rounded-xl p-4">
           <div className="text-[10px] uppercase tracking-widest text-muted">Account value</div>
           <div className="text-xl font-bold font-mono mt-1">{fmtUsd(accountValue)}</div>
         </div>
-        <div className="bg-white/5 rounded-xl p-3">
+        <div className="bg-white/5 rounded-xl p-4">
           <div className="text-[10px] uppercase tracking-widest text-muted">Margin used</div>
           <div className="text-xl font-bold font-mono mt-1">{fmtUsd(totalMarginUsed)}</div>
         </div>
-        <div className="bg-white/5 rounded-xl p-3">
+        <div className="bg-white/5 rounded-xl p-4">
           <div className="text-[10px] uppercase tracking-widest text-muted">Withdrawable</div>
           <div className="text-xl font-bold font-mono mt-1">{fmtUsd(withdrawable)}</div>
         </div>
@@ -126,11 +125,11 @@ export default function PositionsPanel() {
           Open positions ({positions.length})
         </h3>
         {positions.length === 0 ? (
-          <div className="text-sm text-muted p-6 text-center border border-dashed border-white/10 rounded-xl">
+          <div className="text-sm text-muted p-8 text-center border border-dashed border-white/10 rounded-xl">
             {loading ? "Loading…" : "No open positions — place your first trade"}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {positions.map((ap) => {
               const p = ap.position;
               const szi = parseFloat(p.szi);
@@ -188,7 +187,7 @@ export default function PositionsPanel() {
           Recent fills ({fills.length})
         </h3>
         {fills.length === 0 ? (
-          <div className="text-sm text-muted p-4 text-center border border-dashed border-white/10 rounded-xl">
+          <div className="text-sm text-muted p-6 text-center border border-dashed border-white/10 rounded-xl">
             No fills yet — place a trade above
           </div>
         ) : (

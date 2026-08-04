@@ -68,7 +68,7 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
     : 0;
 
   return (
-    <div className="glass rounded-2xl p-5 glow-bull">
+    <div className="glass rounded-2xl p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold">Trade</h2>
@@ -82,7 +82,7 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
       <div className="grid grid-cols-2 gap-2 mb-5">
         <button
           onClick={() => setSide("long")}
-          className={`py-3.5 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 ${
+          className={`py-3 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 ${
             side === "long"
               ? "bg-bull text-black shadow-lg shadow-bull/25"
               : "bg-white/5 text-muted hover:text-white hover:bg-white/10"
@@ -92,7 +92,7 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
         </button>
         <button
           onClick={() => setSide("short")}
-          className={`py-3.5 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 ${
+          className={`py-3 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 ${
             side === "short"
               ? "bg-bear text-white shadow-lg shadow-bear/25"
               : "bg-white/5 text-muted hover:text-white hover:bg-white/10"
@@ -128,7 +128,7 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
         step={5}
         value={sizeUsd}
         onChange={(e) => setSizeUsd(Math.max(10, Number(e.target.value) || 0))}
-        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-4 font-mono text-sm focus:outline-none focus:border-bull/50"
+        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-5 font-mono text-sm focus:outline-none focus:border-bull/50"
       />
 
       {/* Leverage */}
@@ -144,13 +144,13 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
         onChange={(e) => setLeverage(Number(e.target.value))}
         className="w-full mb-2"
       />
-      <div className="flex justify-between text-[10px] text-muted mb-4">
+      <div className="flex justify-between text-[10px] text-muted mb-5">
         <span>1x</span>
         <span>{market?.maxLeverage ?? 10}x</span>
       </div>
 
       {/* Order summary */}
-      <div className="bg-white/5 rounded-xl p-3 mb-4 text-xs font-mono space-y-1.5">
+      <div className="bg-white/5 rounded-xl p-4 mb-5 text-xs font-mono space-y-2">
         <div className="flex justify-between">
           <span className="text-muted">Notional</span>
           <span>${notional.toFixed(2)}</span>

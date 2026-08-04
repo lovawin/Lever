@@ -28,13 +28,13 @@ export default function Page() {
   }, []);
 
   return (
-    <div className="min-h-screen hero-gradient">
+    <div className="min-h-screen hero-gradient flex flex-col">
       {/* Live price ticker */}
       <MarketTicker mids={mids} />
 
       {/* Header */}
       <header className="border-b border-white/5">
-        <div className="mx-auto max-w-5xl flex items-center justify-between px-4 py-4">
+        <div className="mx-auto max-w-6xl flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">
               Lever<span className="text-bull">.</span>
@@ -48,27 +48,25 @@ export default function Page() {
         </div>
       </header>
 
-      {/* Hero tagline — mobile only */}
-      <div className="sm:hidden px-4 pt-4">
-        <p className="text-lg font-bold">long the runner · short the rug</p>
-        <p className="text-xs text-muted mt-1">Perp longs/shorts on Hyperliquid. Non-custodial.</p>
+      {/* Tagline */}
+      <div className="mx-auto max-w-6xl w-full px-6 pt-8 pb-2">
+        <h2 className="text-xl md:text-2xl font-bold">long the runner · short the rug</h2>
+        <p className="text-sm text-muted mt-1">Perp longs & shorts on Hyperliquid. Non-custodial — your wallet, your keys.</p>
       </div>
 
-      {/* Main content */}
-      <main className="mx-auto max-w-5xl px-4 py-6 grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Trade panel — left */}
-        <div className="lg:col-span-2">
+      {/* Main content — trade on left, positions on right */}
+      <main className="mx-auto max-w-6xl w-full px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+        <div className="lg:col-span-5">
           <TradePanel mids={mids} />
         </div>
-        {/* Positions — right */}
-        <div className="lg:col-span-3">
+        <div className="lg:col-span-7">
           <PositionsPanel />
         </div>
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-white/5 mt-8">
-        <div className="mx-auto max-w-5xl px-4 py-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+      <footer className="border-t border-white/5">
+        <div className="mx-auto max-w-6xl px-6 py-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
           <span>Hyperliquid testnet · MVP · not financial advice</span>
           <span>Built with 🔥</span>
         </div>

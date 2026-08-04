@@ -14,8 +14,8 @@ export default function WalletBar() {
   useEffect(() => setMounted(true), []);
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <div className="[&_button]:!h-9 [&_button]:!text-xs [&_button]:!rounded-lg [&_button]:!font-semibold">
+    <div className="flex items-center gap-2">
+      <div className="[&_button]:!h-9 [&_button]:!text-xs [&_button]:!rounded-lg [&_button]:!font-semibold [&_button]:!border-white/10">
         <ConnectButton
           accountStatus="address"
           chainStatus="icon"
@@ -32,7 +32,7 @@ export default function WalletBar() {
               color: "#f5f5f5",
               fontSize: "0.75rem",
               fontWeight: 600,
-              padding: "0 12px",
+              padding: "0 14px",
               borderRadius: "0.5rem",
               height: "2.25rem",
             }}
