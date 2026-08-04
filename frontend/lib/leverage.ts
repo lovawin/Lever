@@ -11,16 +11,12 @@
  * The lending position is USDC collateral / USDC debt.
  *
  * Two-step flow:
- *   Step 1: /kamino/setup — create obligation account (one-time, user signs)
- *   Step 2: /kamino/open-position — open leveraged position (user signs)
- *   Step 3: /jupiter/quote — get swap quote for USDC → meme token
- *   Step 4: Sign and send swap transaction via wallet
+ *   Step 1: /setup — create obligation account on Kamino (one-time)
+ *   Step 2: /openPosition — open leveraged position (user signs)
+ *   Then: Jupiter swap for the meme token purchase
  *
- * For MVP, steps 1+2 use Kamino Blinks API (one REST call returns assembled tx).
- * Step 3+4 uses Jupiter v6 API.
+ * All API calls go directly to Kamino/Jupiter/DexScreener (CORS-enabled).
  */
-
-import { PublicKey } from "@solana/web3.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────
 
@@ -28,8 +24,8 @@ export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 export const KAMINO_MAIN_MARKET = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF";
 
-// Backend API base URL — same origin in prod (Vercel rewrites)
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
+const KAMINO_DIALECT_API = "https://kamino.dial.to/api";
+const KAMINO_REST_API = "https://api.kamino.finance";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -56,18 +52,7 @@ export interface TokenSearchResult {
   liquidity?: number;
 }
 
-export interface JupiterQuoteResult {
-  inputMint: string;
-  outputMint: string;
-  inAmount: string;
-  outAmount: string;
-  priceImpactPct: number;
-  routePlan: Array<{ swapInfo: Record<string, string>; percent: number }>;
-  otherAmountThreshold: string;
-  slippageBps: number;
-}
-
-// ─── Token Search (DexScreener) ──────────────────────────────────────────
+// ─── Token Search (DexScreener — CORS-enabled) ────────────────────────────
 
 export async function searchTokens(query: string): Promise<TokenSearchResult[]> {
   if (query.length < 2) return [];
@@ -99,28 +84,27 @@ export async function searchTokens(query: string): Promise<TokenSearchResult[]> 
     });
   }
 
-  // Sort by volume (most traded first)
   results.sort((a, b) => (b.volume24h ?? 0) - (a.volume24h ?? 0));
   return results.slice(0, 20);
 }
 
-// ─── Kamino Leverage API ─────────────────────────────────────────────────
+// ─── Kamino Leverage API (Dialect/Blinks — CORS-enabled) ─────────────────
 
 export interface KaminoSetupParams {
   wallet: string;             // base58 Solana pubkey
-  market?: string;            // Kamino market address
-  collTokenMint?: string;     // Collateral token (default: SOL)
-  debtTokenMint?: string;     // Debt token (default: USDC)
+  market?: string;
+  collTokenMint?: string;
+  debtTokenMint?: string;
 }
 
 export interface KaminoLeverageParams {
-  wallet: string;             // base58 Solana pubkey
-  market?: string;            // Kamino market address
-  collTokenMint?: string;     // Collateral token
-  debtTokenMint?: string;     // Debt token
+  wallet: string;
+  market?: string;
+  collTokenMint?: string;
+  debtTokenMint?: string;
   leverage: number;           // 1.1 - 10
   amount: number;             // Human-readable deposit amount
-  slippage?: number;          // 0.1 - 10% (default 1%)
+  slippage?: number;          // 0.1 - 10%
 }
 
 /**
@@ -129,20 +113,23 @@ export interface KaminoLeverageParams {
  * Returns a base64-encoded transaction for wallet signing.
  */
 export async function kaminoSetup(params: KaminoSetupParams): Promise<string> {
-  const r = await fetch(`${API_BASE}/api/kamino/setup`, {
+  const market = params.market ?? KAMINO_MAIN_MARKET;
+  const collMint = params.collTokenMint ?? SOL_MINT;
+  const debtMint = params.debtTokenMint ?? USDC_MINT;
+
+  const url = new URL(`${KAMINO_DIALECT_API}/v0/leverage/${market}/setup`);
+  url.searchParams.set("collTokenMint", collMint);
+  url.searchParams.set("debtTokenMint", debtMint);
+
+  const r = await fetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      wallet: params.wallet,
-      market: params.market ?? KAMINO_MAIN_MARKET,
-      collTokenMint: params.collTokenMint ?? SOL_MINT,
-      debtTokenMint: params.debtTokenMint ?? USDC_MINT,
-    }),
+    body: JSON.stringify({ type: "transaction", account: params.wallet }),
   });
 
   if (!r.ok) {
     const err = await r.text();
-    throw new Error(`Kamino setup failed: ${err}`);
+    throw new Error(`Kamino setup failed (${r.status}): ${err}`);
   }
 
   const data = await r.json();
@@ -155,23 +142,26 @@ export async function kaminoSetup(params: KaminoSetupParams): Promise<string> {
  * NOTE: User must have completed setup first.
  */
 export async function kaminoOpenPosition(params: KaminoLeverageParams): Promise<string> {
-  const r = await fetch(`${API_BASE}/api/kamino/open-position`, {
+  const market = params.market ?? KAMINO_MAIN_MARKET;
+  const collMint = params.collTokenMint ?? SOL_MINT;
+  const debtMint = params.debtTokenMint ?? USDC_MINT;
+
+  const url = new URL(`${KAMINO_DIALECT_API}/v0/leverage/${market}/openPosition`);
+  url.searchParams.set("collTokenMint", collMint);
+  url.searchParams.set("debtTokenMint", debtMint);
+  url.searchParams.set("leverage", String(params.leverage));
+  url.searchParams.set("amount", String(params.amount));
+  url.searchParams.set("slippage", String(params.slippage ?? 1.0));
+
+  const r = await fetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      wallet: params.wallet,
-      market: params.market ?? KAMINO_MAIN_MARKET,
-      collTokenMint: params.collTokenMint ?? SOL_MINT,
-      debtTokenMint: params.debtTokenMint ?? USDC_MINT,
-      leverage: params.leverage,
-      amount: params.amount,
-      slippage: params.slippage ?? 1.0,
-    }),
+    body: JSON.stringify({ type: "transaction", account: params.wallet }),
   });
 
   if (!r.ok) {
     const err = await r.text();
-    throw new Error(`Kamino leverage failed: ${err}`);
+    throw new Error(`Kamino leverage failed (${r.status}): ${err}`);
   }
 
   const data = await r.json();
@@ -179,39 +169,38 @@ export async function kaminoOpenPosition(params: KaminoLeverageParams): Promise<
 }
 
 /**
- * Get available Kamino markets (for future UI).
+ * Get available Kamino markets.
  */
-export async function getKaminoMarkets(): Promise<any[]> {
-  const r = await fetch(`${API_BASE}/api/kamino/markets`);
+export async function getKaminoMarkets(): Promise<Array<{name: string; lendingMarket: string}>> {
+  const r = await fetch(`${KAMINO_REST_API}/v2/kamino-market`);
   if (!r.ok) throw new Error(`Kamino markets failed: ${r.status}`);
   return r.json();
 }
 
-// ─── Jupiter Swap ─────────────────────────────────────────────────────────
+// ─── Jupiter Swap (direct — may need proxy for CORS) ─────────────────────
 
 export interface JupiterQuoteParams {
   inputMint: string;
   outputMint: string;
-  amount: number;      // In smallest unit (6 decimals for USDC)
-  slippageBps?: number; // Default 100 = 1%
+  amount: number;         // In smallest unit (6 decimals for USDC, 9 for SOL)
+  slippageBps?: number;
 }
 
 /**
- * Get a Jupiter swap quote for USDC → meme token.
- * Proxied through our backend to avoid CORS issues.
+ * Get a Jupiter swap quote.
+ * Uses v6 quote API (may need proxy for CORS).
  */
-export async function getJupiterQuote(params: JupiterQuoteParams): Promise<JupiterQuoteResult> {
-  const params_str = new URLSearchParams({
-    inputMint: params.inputMint,
-    outputMint: params.outputMint,
-    amount: String(params.amount),
-    slippageBps: String(params.slippageBps ?? 100),
-  });
+export async function getJupiterQuote(params: JupiterQuoteParams): Promise<any> {
+  const url = new URL("https://quote-api.jup.ag/v6/quote");
+  url.searchParams.set("inputMint", params.inputMint);
+  url.searchParams.set("outputMint", params.outputMint);
+  url.searchParams.set("amount", String(params.amount));
+  url.searchParams.set("slippageBps", String(params.slippageBps ?? 100));
 
-  const r = await fetch(`${API_BASE}/api/jupiter/quote?${params_str}`);
+  const r = await fetch(url.toString());
   if (!r.ok) {
     const err = await r.text();
-    throw new Error(`Jupiter quote failed: ${err}`);
+    throw new Error(`Jupiter quote failed (${r.status}): ${err}`);
   }
   return r.json();
 }
