@@ -15,7 +15,6 @@ import { clusterApiUrl } from "@solana/web3.js";
 import "@rainbow-me/rainbowkit/styles.css";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
-// EVM wallet config — WalletConnect project ID (get yours at https://cloud.walletconnect.com)
 const WALLETCONNECT_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "lever-mvp-placeholder";
 
 const wagmiConfig = getDefaultConfig({
@@ -48,10 +47,7 @@ export function Providers({ children }: { children: ReactNode }) {
           <ConnectionProvider endpoint={SOL_ENDPOINT}>
             <WalletProvider wallets={solanaWallets} autoConnect>
               <WalletModalProvider>
-                {/* Render children always; only hide hydration-sensitive wallet UI until mounted */}
-                <div style={{ visibility: mounted ? "visible" : "hidden" }}>
-                  {children}
-                </div>
+                {children}
               </WalletModalProvider>
             </WalletProvider>
           </ConnectionProvider>

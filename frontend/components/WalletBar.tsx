@@ -13,6 +13,16 @@ export default function WalletBar() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  if (!mounted) {
+    // SSR fallback — show skeleton buttons to prevent layout shift
+    return (
+      <div className="flex items-center gap-2">
+        <div className="h-9 w-28 rounded-lg bg-white/10 animate-pulse" />
+        <div className="h-9 w-32 rounded-lg bg-white/10 animate-pulse" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-2">
       <div className="[&_button]:!h-9 [&_button]:!text-xs [&_button]:!rounded-lg [&_button]:!font-semibold [&_button]:!border-white/10">
@@ -23,26 +33,24 @@ export default function WalletBar() {
           label={evmConnected ? "EVM ✓" : "Connect EVM"}
         />
       </div>
-      {mounted && (
-        <div className="[&_button]:!h-9 [&_button]:!text-xs [&_button]:!rounded-lg">
-          <WalletMultiButton
-            style={{
-              backgroundColor: solConnected ? "#9945FF" : "rgba(255,255,255,0.05)",
-              border: solConnected ? "none" : "1px solid rgba(255,255,255,0.1)",
-              color: "#f5f5f5",
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              padding: "0 14px",
-              borderRadius: "0.5rem",
-              height: "2.25rem",
-            }}
-          >
-            {solConnected
-              ? `SOL ${solAddress?.slice(0, 4)}…${solAddress?.slice(-4)}`
-              : "Connect Solana"}
-          </WalletMultiButton>
-        </div>
-      )}
+      <div className="[&_button]:!h-9 [&_button]:!text-xs [&_button]:!rounded-lg">
+        <WalletMultiButton
+          style={{
+            backgroundColor: solConnected ? "#9945FF" : "rgba(255,255,255,0.05)",
+            border: solConnected ? "none" : "1px solid rgba(255,255,255,0.1)",
+            color: "#f5f5f5",
+            fontSize: "0.75rem",
+            fontWeight: 600,
+            padding: "0 14px",
+            borderRadius: "0.5rem",
+            height: "2.25rem",
+          }}
+        >
+          {solConnected
+            ? `SOL ${solAddress?.slice(0, 4)}…${solAddress?.slice(-4)}`
+            : "Connect Solana"}
+        </WalletMultiButton>
+      </div>
     </div>
   );
 }
