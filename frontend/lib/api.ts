@@ -74,15 +74,17 @@ let authToken: string | null = null;
 
 export function setAuthToken(token: string | null) {
   authToken = token;
-  if (token) {
-    localStorage.setItem("lever_token", token);
-  } else {
-    localStorage.removeItem("lever_token");
+  if (typeof window !== 'undefined' && window.localStorage) {
+    if (token) {
+      localStorage.setItem("lever_token", token);
+    } else {
+      localStorage.removeItem("lever_token");
+    }
   }
 }
 
 export function getAuthToken(): string | null {
-  if (!authToken) {
+  if (!authToken && typeof window !== 'undefined' && window.localStorage) {
     authToken = localStorage.getItem("lever_token");
   }
   return authToken;
