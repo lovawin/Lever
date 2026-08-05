@@ -134,13 +134,19 @@ export function calculateTotalFees(
   totalFee: number;
   totalBps: number;
   savingsVsFree: number;
+  withdrawalFee: number; // always 0 — non-custodial
 } {
-  // Lever platform fee
+  // Spot pairs between two spot quote assets have 80% lower taker fees
+  // and maker rebates. Aligned quote assets get 20% lower taker fees.
+  // Lever platform fees are ON TOP of venue fees.
+  // Withdrawals are always free — Lever never holds your funds (non-custodial).
+
+  // Lever platform fee (our fee, on top of venue fees)
   const lever = calculatePlatformFee(notionalUsd, tier);
 
   // HL venue fee (base rate, tier 0)
   // Maker: 0.015% (1.5 bps), Taker: 0.045% (4.5 bps)
-  // Tier discounts reduce these
+  // Higher tiers reduce these based on 14d volume
   const venueFeeSchedule = [
     { maker: 1.5, taker: 4.5 },   // tier 0 (base)
     { maker: 1.2, taker: 4.0 },   // tier 1 (>5M)
@@ -170,6 +176,7 @@ export function calculateTotalFees(
     totalFee,
     totalBps,
     savingsVsFree,
+    withdrawalFee: 0, // non-custodial — we never hold your funds
   };
 }
 

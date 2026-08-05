@@ -368,6 +368,10 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
                 <span>Total fees</span>
                 <span>{formatUsd(fees.totalFee)}</span>
               </div>
+              <div className="flex justify-between text-muted">
+                <span>Withdrawal</span>
+                <span className="text-bull">FREE</span>
+              </div>
             </>
           );
         })()}

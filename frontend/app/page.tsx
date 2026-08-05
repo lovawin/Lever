@@ -109,7 +109,7 @@ export default function Page() {
       {/* Footer */}
       <footer className="border-t border-white/5">
         <div className="mx-auto max-w-[1600px] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-          <span>Live data · Testnet trading · MVP · Platform fee: 0.10% (free w/ 💎 NFT) · not financial advice</span>
+          <span>Live data · Testnet trading · Platform fee: 0.10% · Withdrawals: FREE (non-custodial) · not financial advice</span>
           <span>Built with 🔥</span>
         </div>
       </footer>
