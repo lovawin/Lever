@@ -21,13 +21,13 @@ export default function Page() {
     let alive = true;
     (async () => {
       try {
-        const m = await getAllMids(true);
+        const m = await getAllMids(false); // mainnet for real prices
         if (alive) setMids(m);
       } catch {}
     })();
     const iv = setInterval(async () => {
       try {
-        const m = await getAllMids(true);
+        const m = await getAllMids(false);
         if (alive) setMids(m);
       } catch {}
     }, 15_000);
@@ -38,7 +38,7 @@ export default function Page() {
     let alive = true;
     (async () => {
       try {
-        const meta = await getMeta(true);
+        const meta = await getMeta(false); // mainnet for real markets
         if (alive) setMarkets(meta.universe);
       } catch {}
     })();
@@ -59,7 +59,7 @@ export default function Page() {
             </h1>
             <div className="hidden sm:flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-bull pulse-dot" />
-              <span className="text-[10px] uppercase tracking-widest text-yellow-400">Testnet</span>
+              <span className="text-[10px] uppercase tracking-widest text-yellow-400">Live Data · Testnet Trading</span>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -117,7 +117,7 @@ export default function Page() {
       {/* Footer */}
       <footer className="border-t border-white/5">
         <div className="mx-auto max-w-7xl px-6 py-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-          <span>Testnet · MVP · not financial advice</span>
+          <span>Live data · Testnet trading · MVP · not financial advice</span>
           <span>Built with 🔥</span>
         </div>
       </footer>

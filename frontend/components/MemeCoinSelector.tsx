@@ -43,7 +43,7 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
     let alive = true;
     async function fetch() {
       try {
-        const [meta, ctxs] = await getMetaAndAssetCtxs(true);
+        const [meta, ctxs] = await getMetaAndAssetCtxs(false); // mainnet for real market data
         if (!alive) return;
         const memeCoins: MemeCoin[] = [];
         for (let i = 0; i < meta.universe.length; i++) {

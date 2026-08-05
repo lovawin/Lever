@@ -22,7 +22,7 @@ export default function OrderBook({ coin, midPrice }: OrderBookProps) {
 
     async function refresh() {
       try {
-        const book = await getL2Book(coin, true);
+        const book = await getL2Book(coin, false); // mainnet for order book data (testnet has no liquidity)
         if (!alive) return;
         setBids(book.levels[0].slice(0, BOOK_DEPTH));
         setAsks(book.levels[1].slice(0, BOOK_DEPTH));

@@ -32,7 +32,7 @@ function fmtAnnual(rate: string): string {
   return `${a >= 0 ? "+" : ""}${a.toFixed(1)}%`;
 }
 
-export default function FundingRate({ coin, testnet = true }: FundingRateProps) {
+export default function FundingRate({ coin, testnet = false }: FundingRateProps) {
   const [currentRate, setCurrentRate] = useState<string | null>(null);
   const [premium, setPremium] = useState<string | null>(null);
   const [openInterest, setOpenInterest] = useState<string | null>(null);
