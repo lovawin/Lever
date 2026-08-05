@@ -5,13 +5,11 @@ import { getMetaAndAssetCtxs, type PerpMarket, type AssetCtx } from "@/lib/hyper
 
 // Known meme coin categories for filtering
 const MEME_CATEGORIES: Record<string, string[]> = {
-  "🐕 Doge Fam": ["DOGE", "WIF", "kBONK", "kPEPE", "kSHIB", "kFLOKI", "BONK", "FLOKI", "SHIB", "BOME"],
-  "🐱 Cat Coins": ["PURR", "POPCAT", "CASHCAT", "MEW", "MOODENG"],
-  "🐸 Pepes": ["kPEPE", "PEPE"],
+  "🐕 Doge": ["DOGE", "WIF", "kBONK", "kPEPE", "kSHIB", "kFLOKI", "BONK", "FLOKI", "SHIB", "BOME"],
+  "🐱 Cat": ["PURR", "POPCAT", "CASHCAT", "MEW", "MOODENG"],
+  "🐸 Pepe": ["kPEPE", "PEPE"],
   "🤡 PolitiFi": ["TRUMP", "MELANIA", "FRED", "JEFF", "PUMP"],
-  "🎮 GameFi": ["AXS", "GALA", "SAND", "GMT", "NOT", "XAI"],
-  "🔥 Hot Memes": ["BRETT", "TURBO", "MEME", "GOAT", "PNUT", "MELANIA", "FARTCOIN"],
-  "🐋 DeFi": ["UNI", "AAVE", "CRV", "JUP", "LINK", "PENDLE", "DYDX", "ENA", "SUSHI"],
+  "🔥 Hot": ["BRETT", "TURBO", "MEME", "GOAT", "PNUT", "FARTCOIN"],
 };
 
 type CoinInfo = {
@@ -58,7 +56,7 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
           const ctx = ctxs[i] || {};
           const vol = parseFloat(ctx.dayNtlVlm || "0");
 
-          // Skip delisted/zero-volume unless explicitly searching
+          // Skip zero-volume unless searching
           if (vol === 0 && !search) continue;
 
           allCoins.push({
@@ -89,14 +87,14 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
     if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
     // Category filter
     if (filter === "all") return true;
+    if (filter === "memes") return c.isMeme;
     if (filter === "hot") return c.dayVolume > 5_000_000;
     if (filter === "short-friendly") return parseFloat(c.funding) > 0;
     if (filter === "long-friendly") return parseFloat(c.funding) < 0;
-    if (filter === "memes") return c.isMeme;
     if (filter === "high-lev") return c.maxLeverage >= 10;
     const categoryCoins = MEME_CATEGORIES[filter];
     return categoryCoins ? categoryCoins.includes(c.name) : true;
-  }).slice(0, 50); // Show max 50 at a time
+  }).slice(0, 80); // Show more coins
 
   function fmtVol(v: number) {
     if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
@@ -111,11 +109,23 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
     return `${r >= 0 ? "+" : ""}${r.toFixed(2)}%`;
   }
 
+  // Filter tabs — keep them short
+  const filterTabs = [
+    { key: "all", label: "All" },
+    { key: "memes", label: "🃏 Memes" },
+    { key: "hot", label: "🔥 Hot" },
+    { key: "short-friendly", label: "🔴 Short" },
+    { key: "long-friendly", label: "🟢 Long" },
+    { key: "high-lev", label: "⚡ 10x+" },
+    ...Object.keys(MEME_CATEGORIES).map((k) => ({ key: k, label: k })),
+  ];
+
   return (
     <div className="glass rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-bold">🎭 Markets</h2>
         {loading && <span className="text-[10px] text-muted animate-pulse">loading…</span>}
+        {!loading && <span className="text-[10px] text-muted">{filtered.length} coins</span>}
       </div>
 
       {/* Search */}
@@ -127,21 +137,13 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
         className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono mb-2 focus:outline-none focus:border-bull/50 placeholder:text-muted/50"
       />
 
-      {/* Category pills */}
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        {[
-          { key: "all", label: "All" },
-          { key: "memes", label: "🃏 Memes" },
-          { key: "hot", label: "🔥 Hot" },
-          { key: "short-friendly", label: "🔴 Shorts Paid" },
-          { key: "long-friendly", label: "🟢 Longs Paid" },
-          { key: "high-lev", label: "⚡ 10x+" },
-          ...Object.keys(MEME_CATEGORIES).map((k) => ({ key: k, label: k })),
-        ].map(({ key, label }) => (
+      {/* Category tabs — horizontal scroll */}
+      <div className="flex gap-1 overflow-x-auto pb-2 mb-2 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
+        {filterTabs.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => setFilter(key)}
-            className={`text-[10px] px-2 py-1 rounded-md transition-all ${
+            className={`text-[10px] px-2 py-1 rounded-md whitespace-nowrap shrink-0 transition-all ${
               filter === key
                 ? "bg-white/10 border border-white/20 text-white"
                 : "bg-white/[0.03] border border-white/5 text-muted hover:text-white"
@@ -153,7 +155,7 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
       </div>
 
       {/* Coin list */}
-      <div className="max-h-80 overflow-y-auto space-y-0.5">
+      <div className="max-h-[420px] overflow-y-auto space-y-0.5" style={{ scrollbarWidth: 'thin' }}>
         {filtered.length === 0 && (
           <div className="text-xs text-muted text-center py-4">No coins match</div>
         )}
@@ -167,23 +169,29 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
             <button
               key={c.name}
               onClick={() => onSelect(c.name)}
-              className={`w-full text-left px-3 py-1.5 rounded-lg transition-all flex items-center justify-between gap-2 ${
+              className={`w-full text-left px-3 py-2 rounded-lg transition-all ${
                 isSelected
                   ? "bg-bull/10 border border-bull/30"
                   : "border border-transparent hover:bg-white/5"
               }`}
             >
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="font-bold text-sm font-mono truncate">{c.name}</span>
-                {c.isMeme && <span className="text-[8px] px-1 py-0.5 rounded bg-bull/20 text-bull">MEME</span>}
+              {/* Top row: name + leverage badge */}
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-sm font-mono">{c.name}</span>
+                {c.isMeme && <span className="text-[8px] px-1 py-px rounded bg-bull/20 text-bull leading-none">MEME</span>}
                 <span className="text-[10px] text-muted">{c.maxLeverage}x</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs font-mono shrink-0">
-                <span className="text-white/70">{mid >= 1 ? `$${mid.toFixed(2)}` : mid > 0 ? `$${mid.toPrecision(4)}` : "—"}</span>
-                <span className={`text-[10px] min-w-[50px] text-right ${fundRate > 0 ? "text-bear" : fundRate < 0 ? "text-bull" : "text-muted"}`}>
-                  {fmtFunding(c.funding)}
+                <span className="ml-auto text-xs font-mono text-white/80">
+                  {mid >= 1 ? `$${mid.toFixed(2)}` : mid > 0 ? `$${mid.toPrecision(4)}` : "—"}
                 </span>
-                <span className="text-muted text-[10px] min-w-[45px] text-right">{fmtVol(c.dayVolume)}</span>
+              </div>
+              {/* Bottom row: funding + volume */}
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className={`text-[10px] font-mono ${fundRate > 0 ? "text-bear" : fundRate < 0 ? "text-bull" : "text-muted"}`}>
+                  {fmtFunding(c.funding)} fund
+                </span>
+                <span className="text-[10px] text-muted font-mono">
+                  {fmtVol(c.dayVolume)} vol
+                </span>
               </div>
             </button>
           );
