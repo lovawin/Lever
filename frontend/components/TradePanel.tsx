@@ -168,7 +168,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
   }, [mode, coin, side, sizeUsd, levCapped, address, walletClient, evmConnected, solConnected, publicKey, selectedToken]);
 
   return (
-    <div className="glass rounded-2xl p-6">
+    <div className="glass rounded-2xl p-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold">Trade</h2>

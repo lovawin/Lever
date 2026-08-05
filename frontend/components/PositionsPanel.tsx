@@ -89,7 +89,7 @@ export default function PositionsPanel() {
   const withdrawable = parseFloat(state?.withdrawable ?? "0");
 
   return (
-    <div className="glass rounded-2xl p-6">
+    <div className="glass rounded-2xl p-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold">Account</h2>

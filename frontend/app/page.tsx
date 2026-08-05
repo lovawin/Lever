@@ -52,7 +52,7 @@ export default function Page() {
 
       {/* Header */}
       <header className="border-b border-white/5">
-        <div className="mx-auto max-w-7xl flex items-center justify-between px-6 py-4">
+        <div className="mx-auto max-w-[1600px] flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">
               Lever<span className="text-bull">.</span>
@@ -74,16 +74,10 @@ export default function Page() {
         </div>
       </header>
 
-      {/* Tagline */}
-      <div className="mx-auto max-w-7xl w-full px-6 pt-6 pb-2">
-        <h2 className="text-xl md:text-2xl font-bold">long the runner · short the rug</h2>
-        <p className="text-sm text-muted mt-1">Perps on any market. Spot leverage on any Solana token. Order books · Funding rates · Non-custodial.</p>
-      </div>
-
-      {/* Main content — 3 column layout */}
-      <main className="mx-auto max-w-7xl w-full px-6 py-4 grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
-        {/* Left: Meme coin selector */}
-        <div className="lg:col-span-3">
+      {/* Main content — aligned 3-column layout */}
+      <main className="mx-auto max-w-[1600px] w-full px-4 py-4 grid grid-cols-1 lg:grid-cols-[280px_1fr_320px] gap-4 flex-1 items-start">
+        {/* Left: Market selector — fixed width */}
+        <div className="lg:sticky lg:top-4">
           <MemeCoinSelector
             selected={selectedCoin}
             onSelect={setSelectedCoin}
@@ -91,32 +85,30 @@ export default function Page() {
           />
         </div>
 
-        {/* Center: Trade + Positions */}
-        <div className="lg:col-span-5 space-y-4">
+        {/* Center: Trade panel — flexible width */}
+        <div className="space-y-4">
           <TradePanel
             mids={mids}
             selectedCoin={selectedCoin}
             onCoinChange={setSelectedCoin}
           />
           <PositionsPanel />
+          {showNFT && <NFTBenefits />}
         </div>
 
-        {/* Right: Order book + Funding rate */}
-        <div className="lg:col-span-4 space-y-4">
+        {/* Right: Order book + Funding — fixed width */}
+        <div className="space-y-4">
           <OrderBook
             coin={selectedCoin}
             midPrice={mids[selectedCoin]}
           />
           <FundingRate coin={selectedCoin} />
-
-          {/* NFT Benefits panel (toggle) */}
-          {showNFT && <NFTBenefits />}
         </div>
       </main>
 
       {/* Footer */}
       <footer className="border-t border-white/5">
-        <div className="mx-auto max-w-7xl px-6 py-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+        <div className="mx-auto max-w-[1600px] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
           <span>Live data · Testnet trading · MVP · not financial advice</span>
           <span>Built with 🔥</span>
         </div>
