@@ -11,6 +11,7 @@ import {
   calculateLeverageMetrics,
   openLeveragePosition,
 } from "@/lib/leverage";
+import { calculateTotalFees, formatUsd, type FeeTier } from "@/lib/fees";
 
 /** All perp coins are loaded dynamically from the API */
 
@@ -39,6 +40,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [feeTier] = useState<FeeTier>('free'); // TODO: detect from NFT holdings
   const [tokenQuery, setTokenQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TokenSearchResult[]>([]);
   const [selectedToken, setSelectedToken] = useState<TokenSearchResult | null>(null);
@@ -348,6 +350,27 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
           <span className="text-muted">{mode === "perps" ? "Margin" : "Collateral"}</span>
           <span>${sizeUsd.toFixed(2)}</span>
         </div>
+        {/* Fee breakdown */}
+        {(() => {
+          const fees = calculateTotalFees(notional, feeTier, false, 0);
+          return (
+            <>
+              <div className="border-t border-white/5 pt-2 mt-1" />
+              <div className="flex justify-between text-muted">
+                <span>Platform fee ({fees.leverBps === 0 ? '0' : (fees.leverBps / 100).toFixed(fees.leverBps % 1 === 0 ? 2 : 3)}%)</span>
+                <span>{fees.leverBps === 0 ? <span className="text-bull">FREE</span> : formatUsd(fees.leverFee)}</span>
+              </div>
+              <div className="flex justify-between text-muted">
+                <span>Venue fee ({(fees.venueBps / 100).toFixed(fees.venueBps % 1 === 0 ? 2 : 3)}%)</span>
+                <span>{formatUsd(fees.venueFee)}</span>
+              </div>
+              <div className="flex justify-between font-bold border-t border-white/5 pt-2">
+                <span>Total fees</span>
+                <span>{formatUsd(fees.totalFee)}</span>
+              </div>
+            </>
+          );
+        })()}
         {estLiquidation > 0 && (
           <div className="flex justify-between">
             <span className="text-muted">Est. liq price</span>

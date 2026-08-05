@@ -477,6 +477,109 @@ export async function getFundingHistory(
   return r.json();
 }
 
+// ─── Builder Fee (Platform Fee) ────────────────────────────────────────────
+
+/**
+ * Hyperliquid Builder Code system for platform fees.
+ *
+ * How it works:
+ * 1. User approves a max builder fee for our address (ApproveBuilderFee action)
+ * 2. When placing orders, we include { b: builderAddress, f: feeInTenthsOfBps }
+ * 3. Max fee: 0.1% (10 bps) on perps, 1% on spot
+ * 4. We claim fees through the referral reward process
+ * 5. Each user can have max 10 active builder approvals
+ */
+
+// Builder address — set this to your deployed wallet that holds 100+ USDC
+// In production, this should be an env variable
+const BUILDER_ADDRESS = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_BUILDER_ADDRESS) || '';
+
+// Default builder fee: 1 bp = 0.01% = 1 tenth of a basis point
+// So fee of 10 = 1 basis point = 0.01%
+// fee of 100 = 10 bps = 0.1% (max for perps)
+const DEFAULT_BUILDER_FEE_BPS = 5; // 0.05% = 5 tenths of a basis point
+
+/**
+ * Check the max builder fee a user has approved for our builder address.
+ * Returns the max fee in tenths of basis points, or 0 if not approved.
+ */
+export async function getMaxBuilderFee(
+  userAddress: string,
+  builderAddress?: string,
+  testnet = true,
+): Promise<number> {
+  const builder = builderAddress || BUILDER_ADDRESS;
+  if (!builder) return 0;
+
+  const r = await fetch(baseUrl(testnet) + "/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "maxBuilderFee", user: userAddress, builder }),
+  });
+  if (!r.ok) return 0;
+  const data = await r.json();
+  return typeof data === 'number' ? data : 0;
+}
+
+/**
+ * Approve a builder fee for a user.
+ * This must be signed by the USER's MAIN wallet (not an agent).
+ * The user approves a maximum fee that our builder can charge per order.
+ *
+ * @param maxFee - Maximum fee in tenths of basis points (1 = 0.001%, 10 = 0.01%, 100 = 0.1%)
+ */
+export async function approveBuilderFee(
+  walletClient: WalletClient,
+  builderAddress: string,
+  maxFee: number = 100, // default 0.1% = max allowed for perps
+  testnet = true,
+): Promise<{ status: string; response?: any }> {
+  const nonce = Date.now();
+  const action = {
+    type: "approveBuilderFee",
+    builder: builderAddress,
+    maxFee,
+  };
+
+  const sig = await signL1Action(walletClient, action, nonce, !testnet);
+
+  const resp = await fetch(baseUrl(testnet) + "/exchange", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, nonce, signature: sig }),
+  });
+
+  if (!resp.ok) throw new Error(`Approve builder fee failed (${resp.status})`);
+  return resp.json();
+}
+
+/**
+ * Remove a builder fee approval.
+ */
+export async function removeBuilderFee(
+  walletClient: WalletClient,
+  builderAddress: string,
+  testnet = true,
+): Promise<{ status: string; response?: any }> {
+  const nonce = Date.now();
+  const action = {
+    type: "approveBuilderFee",
+    builder: builderAddress,
+    maxFee: 0, // Setting to 0 removes the approval
+  };
+
+  const sig = await signL1Action(walletClient, action, nonce, !testnet);
+
+  const resp = await fetch(baseUrl(testnet) + "/exchange", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, nonce, signature: sig }),
+  });
+
+  if (!resp.ok) throw new Error(`Remove builder fee failed (${resp.status})`);
+  return resp.json();
+}
+
 // ─── Update Leverage ──────────────────────────────────────────────────────
 
 export async function updateLeverage(
