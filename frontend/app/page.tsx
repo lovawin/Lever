@@ -77,7 +77,7 @@ export default function Page() {
       {/* Tagline */}
       <div className="mx-auto max-w-7xl w-full px-6 pt-6 pb-2">
         <h2 className="text-xl md:text-2xl font-bold">long the runner · short the rug</h2>
-        <p className="text-sm text-muted mt-1">Long & short memecoins with leverage. Order books · Funding rates · Spot leverage on Solana.</p>
+        <p className="text-sm text-muted mt-1">Perps on any market. Spot leverage on any Solana token. Order books · Funding rates · Non-custodial.</p>
       </div>
 
       {/* Main content — 3 column layout */}

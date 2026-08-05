@@ -12,8 +12,7 @@ import {
   openLeveragePosition,
 } from "@/lib/leverage";
 
-/** HL perp coins — these support real longs AND shorts */
-const HL_PERP_MEMECOINS = ["PURR", "HYPE", "WIF", "TRUMP", "kPEPE", "kBONK", "DOGE"];
+/** All perp coins are loaded dynamically from the API */
 
 type TradeMode = "perps" | "spot";
 
@@ -49,8 +48,8 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
     let alive = true;
     (async () => {
       try {
-        const meta = await getMeta(true);
-        if (alive) setMarkets(meta.universe.filter((u) => HL_PERP_MEMECOINS.includes(u.name)));
+        const meta = await getMeta(false); // mainnet for real market data
+        if (alive) setMarkets(meta.universe);
       } catch {}
     })();
     return () => { alive = false; };
