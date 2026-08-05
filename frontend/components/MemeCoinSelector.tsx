@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getMetaAndAssetCtxs, type PerpMarket, type AssetCtx } from "@/lib/hyperliquid";
 
-// Meme coin categories on Hyperliquid
+// Meme coin categories
 const MEME_CATEGORIES: Record<string, string[]> = {
   "🐕 Doge Fam": ["DOGE", "WIF", "kBONK", "BONK", "FLOKI", "SHIB"],
   "🐱 Cat Coins": ["PURR", "POPCAT", "CASHCAT", "MEW"],

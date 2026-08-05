@@ -77,7 +77,7 @@ export default function PositionsPanel() {
         <div className="text-5xl mb-4">🔑</div>
         <h3 className="text-lg font-bold mb-2">Connect Your Wallet</h3>
         <p className="text-sm text-muted max-w-sm">
-          Connect an EVM wallet (MetaMask, Rabby) to see your Hyperliquid testnet positions and trade history.
+          Connect an EVM wallet (MetaMask, Rabby) to see your testnet positions and trade history.
         </p>
       </div>
     );

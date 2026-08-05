@@ -77,7 +77,7 @@ export default function Page() {
       {/* Tagline */}
       <div className="mx-auto max-w-7xl w-full px-6 pt-6 pb-2">
         <h2 className="text-xl md:text-2xl font-bold">long the runner · short the rug</h2>
-        <p className="text-sm text-muted mt-1">Meme coin perps on Hyperliquid. Non-custodial. Funding rates · Order books · Spot leverage on Solana.</p>
+        <p className="text-sm text-muted mt-1">Long & short memecoins with leverage. Order books · Funding rates · Spot leverage on Solana.</p>
       </div>
 
       {/* Main content — 3 column layout */}
@@ -117,7 +117,7 @@ export default function Page() {
       {/* Footer */}
       <footer className="border-t border-white/5">
         <div className="mx-auto max-w-7xl px-6 py-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-          <span>Hyperliquid testnet · MVP · not financial advice</span>
+          <span>Testnet · MVP · not financial advice</span>
           <span>Built with 🔥</span>
         </div>
       </footer>

@@ -3,7 +3,7 @@ import { Providers } from "@/components/Providers";
 
 export const metadata = {
   title: "Lever — long/short memecoins",
-  description: "Hyperliquid-powered long/short platform for memecoins.",
+  description: "Long & short memecoins with leverage. Order books, funding rates, spot leverage.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

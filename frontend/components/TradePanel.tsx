@@ -94,9 +94,9 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
 
     try {
       if (mode === "perps") {
-        // ─── HL Perps ────────────────────────────────────────────────────
+        // ─── Perps ────────────────────────────────────────────────────
         if (!evmConnected || !address || !walletClient) {
-          throw new Error("Connect an EVM wallet (MetaMask/Rabby) for HL perps");
+          throw new Error("Connect an EVM wallet (MetaMask/Rabby) for perps");
         }
 
         const r = await placeMarketOrder({
@@ -189,7 +189,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
               : "bg-white/[0.03] border-white/5 text-muted hover:text-white hover:bg-white/5"
           }`}
         >
-          ⚡ HL Perps
+          ⚡ Perps
         </button>
         <button
           onClick={() => { setMode("spot"); setSide("long"); }}
@@ -206,7 +206,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
       {/* Mode description */}
       <div className="text-[10px] text-muted mb-5 px-1 leading-relaxed">
         {mode === "perps" ? (
-          <>Perpetual contracts on Hyperliquid. Long &amp; short with up to {market?.maxLeverage ?? 20}x leverage. Requires EVM wallet.</>
+          <>Perpetual contracts. Long &amp; short with up to {market?.maxLeverage ?? 20}x leverage. Requires EVM wallet.</>
         ) : (
           <>Leveraged spot buys on any Solana token via Kamino lending + Jupiter swap. Long only, up to 5x. Requires Solana wallet.</>
         )}
