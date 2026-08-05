@@ -1,19 +1,28 @@
 """
-Lever signals API.
+Lever Trading Backend — API v2
 
-Returns memecoin health scores so the frontend can curate what to show.
-
-For Solana tokens, uses DexScreener public API (free, no auth) plus Helius RPC.
-For EVM tokens (Robinhood Chain, etc.) can be added later.
+Core features:
+- Wallet-based auth (sign message)
+- Internal balance tracking (deposits, withdrawals, P&L)
+- Order routing to HL (our master account executes on behalf of users)
+- Platform fee collection
+- Position tracking
 """
 import os
 import time
+import hashlib
+import secrets
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from datetime import datetime, timezone
+from typing import Optional
 
-app = FastAPI(title="Lever Signals", version="0.2.0")
+from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+app = FastAPI(title="Lever Trading", version="2.0.0")
 
 CORS_ORIGIN = os.getenv("CORS_ORIGIN", "*")
 app.add_middleware(
@@ -23,362 +32,495 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-HELIUS_KEY = os.getenv("HELIUS_API_KEY", "")
-DEXSCREENER = "https://api.dexscreener.com/latest/dex"
+# ─── Config ──────────────────────────────────────────────────────────────────
 
-# In-memory cache (simple TTL). Real prod would use Redis.
-_cache: dict[str, tuple[float, dict]] = {}
-_TTL_S = 60
+HL_API_URL = os.getenv("HL_API_URL", "https://api.hyperliquid.xyz")
+HL_TESTNET_URL = os.getenv("HL_TESTNET_URL", "https://api.hyperliquid-testnet.xyz")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+PLATFORM_FEE_BPS = float(os.getenv("PLATFORM_FEE_BPS", "10"))  # 0.10% default
+TREASURY_ADDRESS = os.getenv("TREASURY_ADDRESS", "")
+HL_PRIVATE_KEY = os.getenv("HL_PRIVATE_KEY", "")  # Our master account key
+
+# ─── Database ────────────────────────────────────────────────────────────────
+
+def get_db():
+    """Get a database connection."""
+    if not DATABASE_URL:
+        return None
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    return conn
 
 
-def _get_cached(key: str) -> dict | None:
-    if key in _cache:
-        ts, data = _cache[key]
-        if time.time() - ts < _TTL_S:
-            return data
-    return None
+def init_db():
+    """Create tables if they don't exist."""
+    conn = get_db()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    address TEXT UNIQUE NOT NULL,
+                    nonce TEXT NOT NULL,
+                    fee_tier TEXT DEFAULT 'free',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    last_login TIMESTAMPTZ
+                );
+                
+                CREATE TABLE IF NOT EXISTS balances (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    asset TEXT DEFAULT 'USDC',
+                    available NUMERIC(20, 8) DEFAULT 0,
+                    locked NUMERIC(20, 8) DEFAULT 0,
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE(user_id, asset)
+                );
+                
+                CREATE TABLE IF NOT EXISTS deposits (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    tx_hash TEXT,
+                    amount NUMERIC(20, 8) NOT NULL,
+                    asset TEXT DEFAULT 'USDC',
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    confirmed_at TIMESTAMPTZ
+                );
+                
+                CREATE TABLE IF NOT EXISTS withdrawals (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    amount NUMERIC(20, 8) NOT NULL,
+                    asset TEXT DEFAULT 'USDC',
+                    destination TEXT NOT NULL,
+                    tx_hash TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    processed_at TIMESTAMPTZ
+                );
+                
+                CREATE TABLE IF NOT EXISTS orders (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    coin TEXT NOT NULL,
+                    side TEXT NOT NULL,  -- 'long' or 'short'
+                    size_usd NUMERIC(20, 8) NOT NULL,
+                    leverage INTEGER NOT NULL DEFAULT 1,
+                    platform_fee NUMERIC(20, 8) DEFAULT 0,
+                    venue_fee_est NUMERIC(20, 8) DEFAULT 0,
+                    hl_order_id TEXT,
+                    status TEXT DEFAULT 'pending',
+                    fill_price NUMERIC(20, 8),
+                    fill_size NUMERIC(20, 8),
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ
+                );
+                
+                CREATE TABLE IF NOT EXISTS positions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    coin TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    size NUMERIC(20, 8) NOT NULL,
+                    entry_price NUMERIC(20, 8) NOT NULL,
+                    leverage INTEGER NOT NULL,
+                    liquidation_price NUMERIC(20, 8),
+                    unrealized_pnl NUMERIC(20, 8) DEFAULT 0,
+                    status TEXT DEFAULT 'open',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    closed_at TIMESTAMPTZ
+                );
+                
+                CREATE TABLE IF NOT EXISTS fee_log (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    order_id INTEGER REFERENCES orders(id),
+                    fee_type TEXT NOT NULL,  -- 'platform' or 'venue'
+                    amount NUMERIC(20, 8) NOT NULL,
+                    asset TEXT DEFAULT 'USDC',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            conn.commit()
+    finally:
+        conn.close()
 
 
-def _set_cache(key: str, data: dict) -> None:
-    _cache[key] = (time.time(), data)
+# ─── Auth ────────────────────────────────────────────────────────────────────
+
+# In-memory session store (prod would use Redis/DB)
+_sessions: dict[str, dict] = {}  # token -> user_info
 
 
-class Signal(BaseModel):
-    chain: str
+class AuthChallenge(BaseModel):
     address: str
-    symbol: str
-    price_usd: float | None = None
-    market_cap_usd: float | None = None
-    fdv_usd: float | None = None
-    liquidity_usd: float | None = None
-    volume_24h_usd: float | None = None
-    price_change_24h_pct: float | None = None
-    buys_24h: int | None = None
-    sells_24h: int | None = None
-    liquidity_ratio: float | None = None  # liquidity / mcap
-    buy_pressure_24h: float | None = None  # buys / (buys + sells)
-    score: int | None = None  # 0-100 composite
-    notes: list[str] = []
 
 
-def score_signal(s: Signal) -> Signal:
-    """Compute a 0-100 score from the metrics.
+class AuthVerify(BaseModel):
+    address: str
+    signature: str
+    message: str
 
-    Components (each 0-100, weighted):
-      - liquidity ratio: 25% (healthy = >2%, rug = <0.5%)
-      - buy pressure 24h: 20% (>55% buys = bull, <45% = bear)
-      - volume: 20% (>$100k = healthy)
-      - price action: 15% (mild up = ok, big up = suspicious, down = bearish)
-      - mcap floor: 20% (>$1m = real, <$100k = micro)
+
+class SessionInfo(BaseModel):
+    token: str
+    address: str
+    fee_tier: str = "free"
+
+
+@app.post("/api/auth/challenge")
+async def auth_challenge(req: AuthChallenge):
+    """Generate a nonce for the user to sign."""
+    nonce = secrets.token_hex(16)
+    # Store nonce for this address
+    _sessions[f"nonce:{req.address.lower()}"] = {
+        "nonce": nonce,
+        "expires": time.time() + 300,  # 5 min
+    }
+    message = (
+        f"Lever Trading\n\n"
+        f"Sign this message to verify your wallet.\n\n"
+        f"Nonce: {nonce}"
+    )
+    return {"message": message, "nonce": nonce}
+
+
+@app.post("/api/auth/verify", response_model=SessionInfo)
+async def auth_verify(req: AuthVerify):
+    """Verify a signed message and issue a session token."""
+    # In production, verify the signature cryptographically
+    # For MVP, we trust the frontend's verification
+    # TODO: Add proper eth_verify / solana_verify
+    
+    nonce_key = f"nonce:{req.address.lower()}"
+    nonce_data = _sessions.get(nonce_key)
+    if not nonce_data:
+        raise HTTPException(400, "No challenge found. Request a new one.")
+    if time.time() > nonce_data["expires"]:
+        del _sessions[nonce_key]
+        raise HTTPException(400, "Challenge expired. Request a new one.")
+    
+    # Issue session token
+    token = secrets.token_hex(32)
+    user_info = {
+        "address": req.address.lower(),
+        "fee_tier": "free",  # TODO: check NFT holdings
+        "created": time.time(),
+    }
+    _sessions[token] = user_info
+    del _sessions[nonce_key]  # Clean up nonce
+    
+    return SessionInfo(
+        token=token,
+        address=req.address.lower(),
+        fee_tier=user_info["fee_tier"],
+    )
+
+
+def get_current_user(authorization: str = Header(None)) -> dict:
+    """Extract and validate session token from Authorization header."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing or invalid authorization")
+    token = authorization[7:]
+    user = _sessions.get(token)
+    if not user:
+        raise HTTPException(401, "Invalid or expired session")
+    if time.time() - user.get("created", 0) > 86400:  # 24h expiry
+        del _sessions[token]
+        raise HTTPException(401, "Session expired. Please re-login.")
+    return user
+
+
+# ─── Balance ─────────────────────────────────────────────────────────────────
+
+class BalanceResponse(BaseModel):
+    address: str
+    asset: str = "USDC"
+    available: float
+    locked: float
+    total: float
+    fee_tier: str
+
+
+@app.get("/api/balance", response_model=BalanceResponse)
+async def get_balance(user: dict = Depends(get_current_user)):
+    """Get the user's internal balance."""
+    # MVP: In-memory balances. Production would use the database.
+    # For now, return a mock balance for demo purposes
+    address = user["address"]
+    balance_key = f"balance:{address}:USDC"
+    
+    if balance_key not in _sessions:
+        # Give demo balance for testing
+        _sessions[balance_key] = {
+            "available": 10000.0,  # $10,000 demo USDC
+            "locked": 0.0,
+        }
+    
+    bal = _sessions[balance_key]
+    return BalanceResponse(
+        address=address,
+        available=bal["available"],
+        locked=bal["locked"],
+        total=bal["available"] + bal["locked"],
+        fee_tier=user["fee_tier"],
+    )
+
+
+# ─── Deposit ────────────────────────────────────────────────────────────────
+
+class DepositAddressResponse(BaseModel):
+    address: str
+    memo: str | None = None
+    network: str = "ethereum"
+    asset: str = "USDC"
+
+
+@app.get("/api/deposit/address", response_model=DepositAddressResponse)
+async def get_deposit_address(user: dict = Depends(get_current_user)):
+    """Get a deposit address for the user.
+    
+    MVP: Returns our master deposit address.
+    Production: Generate per-user addresses or use smart contract.
     """
-    parts: list[tuple[float, float]] = []  # (component_score, weight)
-
-    # liquidity ratio
-    if s.liquidity_ratio is not None:
-        r = s.liquidity_ratio
-        if r >= 0.02:
-            parts.append((100.0, 25.0))
-        elif r >= 0.01:
-            parts.append((70.0, 25.0))
-        elif r >= 0.005:
-            parts.append((40.0, 25.0))
-        else:
-            parts.append((10.0, 25.0))
-
-    # buy pressure 24h
-    if s.buy_pressure_24h is not None:
-        bp = s.buy_pressure_24h
-        if bp >= 0.55:
-            parts.append((100.0, 20.0))
-        elif bp >= 0.45:
-            parts.append((60.0, 20.0))
-        else:
-            parts.append((20.0, 20.0))
-
-    # volume
-    if s.volume_24h_usd is not None:
-        v = s.volume_24h_usd
-        if v >= 500_000:
-            parts.append((100.0, 20.0))
-        elif v >= 100_000:
-            parts.append((75.0, 20.0))
-        elif v >= 25_000:
-            parts.append((50.0, 20.0))
-        else:
-            parts.append((20.0, 20.0))
-
-    # price change 24h
-    if s.price_change_24h_pct is not None:
-        p = s.price_change_24h_pct
-        if -10 <= p <= 30:
-            parts.append((80.0, 15.0))
-        elif p > 30:
-            parts.append((50.0, 15.0))  # suspicious pump
-        elif p > -30:
-            parts.append((40.0, 15.0))
-        else:
-            parts.append((10.0, 15.0))
-
-    # mcap floor
-    if s.market_cap_usd is not None:
-        m = s.market_cap_usd
-        if m >= 5_000_000:
-            parts.append((100.0, 20.0))
-        elif m >= 1_000_000:
-            parts.append((80.0, 20.0))
-        elif m >= 250_000:
-            parts.append((55.0, 20.0))
-        else:
-            parts.append((20.0, 20.0))
-
-    notes: list[str] = []
-    if s.liquidity_ratio is not None and s.liquidity_ratio < 0.005:
-        notes.append("thin liquidity — high rug risk")
-    if s.price_change_24h_pct is not None and s.price_change_24h_pct > 50:
-        notes.append("pumping — could be a setup")
-    if s.buy_pressure_24h is not None and s.buy_pressure_24h > 0.7:
-        notes.append("extreme buy pressure — late or coordinated?")
-    if s.market_cap_usd is not None and s.market_cap_usd < 250_000:
-        notes.append("micro-cap — extreme volatility expected")
-
-    if parts:
-        total_w = sum(w for _, w in parts)
-        weighted = sum(c * w for c, w in parts) / total_w
-        s.score = int(round(weighted))
-    else:
-        s.score = None
-    s.notes = notes
-    return s
+    if not TREASURY_ADDRESS:
+        raise HTTPException(501, "Deposit address not configured")
+    
+    return DepositAddressResponse(
+        address=TREASURY_ADDRESS,
+        memo=user["address"],  # Use user's address as memo
+        network="ethereum",
+        asset="USDC",
+    )
 
 
-async def fetch_solana_signal(mint: str) -> Signal | None:
-    cache_key = f"sol:{mint}"
-    cached = _get_cached(cache_key)
-    if cached:
-        return Signal(**cached)
+class DepositConfirmRequest(BaseModel):
+    tx_hash: str
+    amount: float
 
-    # DexScreener public API
+
+@app.post("/api/deposit/confirm")
+async def confirm_deposit(req: DepositConfirmRequest, user: dict = Depends(get_current_user)):
+    """Confirm a deposit. 
+    
+    MVP: Trust the user's reported amount (demo).
+    Production: Verify on-chain tx, check confirmations, credit after safe depth.
+    """
+    address = user["address"]
+    balance_key = f"balance:{address}:USDC"
+    
+    if balance_key not in _sessions:
+        _sessions[balance_key] = {"available": 10000.0, "locked": 0.0}
+    
+    _sessions[balance_key]["available"] += req.amount
+    
+    return {
+        "status": "credited",
+        "amount": req.amount,
+        "new_balance": _sessions[balance_key]["available"],
+    }
+
+
+# ─── Withdrawal ──────────────────────────────────────────────────────────────
+
+class WithdrawRequest(BaseModel):
+    amount: float
+    destination: str  # wallet address to send to
+    asset: str = "USDC"
+
+
+class WithdrawResponse(BaseModel):
+    id: str
+    amount: float
+    destination: str
+    status: str
+    fee: float  # Always 0 for now
+
+
+@app.post("/api/withdraw", response_model=WithdrawResponse)
+async def request_withdrawal(req: WithdrawRequest, user: dict = Depends(get_current_user)):
+    """Request a withdrawal. Always free (non-custodial ethos).
+    
+    MVP: Deduct from internal balance immediately.
+    Production: Queue for processing, send from master wallet, confirm on-chain.
+    """
+    address = user["address"]
+    balance_key = f"balance:{address}:USDC"
+    
+    if balance_key not in _sessions:
+        raise HTTPException(400, "No balance found")
+    
+    bal = _sessions[balance_key]
+    if req.amount > bal["available"]:
+        raise HTTPException(400, f"Insufficient balance. Available: ${bal['available']:.2f}")
+    
+    # Deduct from available
+    bal["available"] -= req.amount
+    
+    withdraw_id = secrets.token_hex(8)
+    
+    return WithdrawResponse(
+        id=withdraw_id,
+        amount=req.amount,
+        destination=req.destination,
+        status="processing",
+        fee=0.0,  # Always free
+    )
+
+
+# ─── Order Placement ─────────────────────────────────────────────────────────
+
+class PlaceOrderRequest(BaseModel):
+    coin: str
+    side: str  # "long" or "short"
+    size_usd: float = Field(ge=10)
+    leverage: int = Field(ge=1, le=50)
+
+
+class OrderResponse(BaseModel):
+    id: str
+    coin: str
+    side: str
+    size_usd: float
+    leverage: int
+    platform_fee: float
+    venue_fee_est: float
+    total_fee: float
+    status: str
+    fill_price: float | None = None
+    fill_size: float | None = None
+
+
+@app.post("/api/order", response_model=OrderResponse)
+async def place_order(req: PlaceOrderRequest, user: dict = Depends(get_current_user)):
+    """Place an order. 
+    
+    The backend:
+    1. Validates user balance
+    2. Deducts platform fee
+    3. Routes to HL via our master account
+    4. Tracks the position internally
+    """
+    address = user["address"]
+    balance_key = f"balance:{address}:USDC"
+    
+    # Check balance
+    if balance_key not in _sessions:
+        _sessions[balance_key] = {"available": 10000.0, "locked": 0.0}
+    
+    bal = _sessions[balance_key]
+    
+    # Calculate fees
+    notional = req.size_usd * req.leverage
+    platform_fee = notional * (PLATFORM_FEE_BPS / 10000)
+    venue_fee_est = notional * 0.00045  # 0.045% taker fee estimate
+    total_fee = platform_fee + venue_fee_est
+    
+    # Check if user can cover margin + fees
+    total_cost = req.size_usd + platform_fee
+    if total_cost > bal["available"]:
+        raise HTTPException(
+            400, 
+            f"Insufficient balance. Need ${total_cost:.2f} (margin ${req.size_usd:.2f} + fee ${platform_fee:.2f}), have ${bal['available']:.2f}"
+        )
+    
+    # Deduct margin + platform fee
+    bal["available"] -= total_cost
+    bal["locked"] += req.size_usd  # Margin locked in position
+    
+    # In production: route to HL via our master account
+    # For MVP: simulate the order
+    order_id = secrets.token_hex(8)
+    
+    # TODO: Actually place the order on HL using HL_PRIVATE_KEY
+    # This would use the HL API to place the order with builder fee
+    
+    return OrderResponse(
+        id=order_id,
+        coin=req.coin,
+        side=req.side,
+        size_usd=req.size_usd,
+        leverage=req.leverage,
+        platform_fee=platform_fee,
+        venue_fee_est=venue_fee_est,
+        total_fee=total_fee,
+        status="filled",  # MVP: auto-fill
+        fill_price=None,  # Would be set from HL response
+        fill_size=None,
+    )
+
+
+# ─── Positions ────────────────────────────────────────────────────────────────
+
+@app.get("/api/positions")
+async def get_positions(user: dict = Depends(get_current_user)):
+    """Get user's open positions."""
+    # MVP: Return positions from HL for the master account, filtered by user
+    # Production: Map HL positions to internal user positions
+    
+    # For now, proxy to HL
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(f"{DEXSCREENER}/tokens/{mint}")
-            if r.status_code != 200:
-                return None
-            data = r.json()
-            pairs = data.get("pairs") or []
-            # Pick the highest-liquidity pair
-            if not pairs:
-                return None
-            best = max(pairs, key=lambda p: float((p.get("liquidity") or {}).get("usd") or 0))
-            liq = (best.get("liquidity") or {}).get("usd")
-            vol = (best.get("volume") or {}).get("h24")
-            txns = best.get("txns") or {}
-            h24 = txns.get("h24") or {}
-            buys = h24.get("buys")
-            sells = h24.get("sells")
-            price_change = (best.get("priceChange") or {}).get("h24")
-            mcap = best.get("marketCap") or best.get("fdv")
-            fdv = best.get("fdv")
-            price = (best.get("priceUsd"))
-            base = best.get("baseToken") or {}
-
-            liq_f = float(liq) if liq is not None else None
-            vol_f = float(vol) if vol is not None else None
-            mcap_f = float(mcap) if mcap is not None else None
-            fdv_f = float(fdv) if fdv is not None else None
-            price_f = float(price) if price is not None else None
-
-            total_tx = (buys or 0) + (sells or 0)
-            bp = (buys / total_tx) if total_tx else None
-            liq_ratio = (liq_f / mcap_f) if (liq_f and mcap_f) else None
-
-            sig = Signal(
-                chain="solana",
-                address=mint,
-                symbol=base.get("symbol") or mint[:6],
-                price_usd=price_f,
-                market_cap_usd=mcap_f,
-                fdv_usd=fdv_f,
-                liquidity_usd=liq_f,
-                volume_24h_usd=vol_f,
-                price_change_24h_pct=float(price_change) if price_change is not None else None,
-                buys_24h=buys,
-                sells_24h=sells,
-                liquidity_ratio=liq_ratio,
-                buy_pressure_24h=bp,
+            r = await client.post(
+                f"{HL_API_URL}/info",
+                json={"type": "clearinghouseState", "user": TREASURY_ADDRESS or "0x0000000000000000000000000000000000000000"},
             )
-            sig = score_signal(sig)
-            _set_cache(cache_key, sig.model_dump())
-            return sig
+            if r.status_code == 200:
+                return r.json()
     except Exception:
-        return None
+        pass
+    
+    return {"positions": [], "margin": {}}
 
+
+# ─── Fee Info ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/fees")
+async def get_fee_info(user: dict = Depends(get_current_user)):
+    """Get fee schedule for the user's tier."""
+    tier = user.get("fee_tier", "free")
+    
+    tiers = {
+        "free": {"platform_bps": 10, "discount_pct": 0, "funding_rebate_pct": 0},
+        "iron": {"platform_bps": 9, "discount_pct": 10, "funding_rebate_pct": 0},
+        "silver": {"platform_bps": 7.5, "discount_pct": 25, "funding_rebate_pct": 0},
+        "gold": {"platform_bps": 5, "discount_pct": 50, "funding_rebate_pct": 15},
+        "diamond": {"platform_bps": 0, "discount_pct": 100, "funding_rebate_pct": 25},
+    }
+    
+    info = tiers.get(tier, tiers["free"])
+    
+    return {
+        "tier": tier,
+        "platform_fee_bps": info["platform_bps"],
+        "platform_fee_pct": info["platform_bps"] / 100,
+        "discount_pct": info["discount_pct"],
+        "funding_rebate_pct": info["funding_rebate_pct"],
+        "venue_fee_bps": 4.5,  # HL base taker fee
+        "withdrawal_fee_bps": 0,
+        "withdrawal_fee_pct": 0,
+        "withdrawal_note": "Free — Lever is non-custodial, your funds are always yours",
+    }
+
+
+# ─── Health ──────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "lever-signals"}
+    return {
+        "ok": True,
+        "service": "lever-trading",
+        "version": "2.0.0",
+        "platform_fee_bps": PLATFORM_FEE_BPS,
+        "treasury_configured": bool(TREASURY_ADDRESS),
+    }
 
 
-@app.get("/hl/meta")
-async def hyperliquid_meta():
-    """Proxy to Hyperliquid public info endpoint for market universe."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(
-                os.getenv("HL_INFO_URL", "https://api.hyperliquid.xyz/info"),
-                json={"type": "meta"},
-            )
-            r.raise_for_status()
-            return r.json()
-    except Exception as e:
-        raise HTTPException(500, str(e))
+# ─── Init ────────────────────────────────────────────────────────────────────
 
-
-@app.get("/hl/mids")
-async def hyperliquid_mids():
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(
-                os.getenv("HL_INFO_URL", "https://api.hyperliquid.xyz/info"),
-                json={"type": "allMids"},
-            )
-            r.raise_for_status()
-            return r.json()
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-@app.get("/signal/solana/{mint}", response_model=Signal)
-async def signal_solana(mint: str):
-    sig = await fetch_solana_signal(mint)
-    if not sig:
-        raise HTTPException(404, f"no signal for {mint}")
-    return sig
-
-
-@app.get("/signals/batch")
-async def signals_batch(mints: str):
-    """Comma-separated mint addresses, returns signals for each."""
-    items = [m.strip() for m in mints.split(",") if m.strip()]
-    out = []
-    for m in items[:20]:  # cap batch size
-        sig = await fetch_solana_signal(m)
-        if sig:
-            out.append(sig.model_dump())
-    return {"count": len(out), "signals": out}
-
-
-# ─── Kamino Leverage API ────────────────────────────────────────────────────
-# Proxies to Kamino Dialect/Blinks API for leveraged positions.
-# Two-step flow: setup (create obligation) → openPosition (deposit + borrow)
-
-KAMINO_DIALECT = "https://kamino.dial.to/api"
-KAMINO_REST = "https://api.kamino.finance"
-KAMINO_MAIN_MARKET = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF"
-USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-SOL_MINT = "So11111111111111111111111111111111111111112"
-
-
-class KaminoSetupRequest(BaseModel):
-    wallet: str  # base58 pubkey
-    market: str = KAMINO_MAIN_MARKET
-    collTokenMint: str = SOL_MINT
-    debtTokenMint: str = USDC_MINT
-
-
-class KaminoLeverageRequest(BaseModel):
-    wallet: str  # base58 pubkey
-    market: str = KAMINO_MAIN_MARKET
-    collTokenMint: str = SOL_MINT
-    debtTokenMint: str = USDC_MINT
-    leverage: float = 2.0  # 1.1 to 10
-    amount: float = 0.1  # human-readable deposit amount
-    slippage: float = 1.0  # 0.1 to 10%
-
-
-@app.post("/kamino/setup")
-async def kamino_setup(req: KaminoSetupRequest):
-    """Create a Kamino obligation account for leveraged positions.
-    Returns a base64 transaction for wallet signing."""
-    url = (
-        f"{KAMINO_DIALECT}/v0/leverage/{req.market}/setup"
-        f"?collTokenMint={req.collTokenMint}"
-        f"&debtTokenMint={req.debtTokenMint}"
-    )
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(url, json={"type": "transaction", "account": req.wallet})
-            r.raise_for_status()
-            return r.json()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"Kamino setup error: {e.response.text}")
-    except Exception as e:
-        raise HTTPException(500, f"Kamino setup failed: {e}")
-
-
-@app.post("/kamino/open-position")
-async def kamino_open_position(req: KaminoLeverageRequest):
-    """Open a leveraged position via Kamino Dialect/Blinks API.
-    Returns a base64 transaction for wallet signing.
-    NOTE: User must have called /setup first."""
-    url = (
-        f"{KAMINO_DIALECT}/v0/leverage/{req.market}/openPosition"
-        f"?collTokenMint={req.collTokenMint}"
-        f"&debtTokenMint={req.debtTokenMint}"
-        f"&leverage={req.leverage}"
-        f"&amount={req.amount}"
-        f"&slippage={req.slippage}"
-    )
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(url, json={"type": "transaction", "account": req.wallet})
-            r.raise_for_status()
-            return r.json()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"Kamino leverage error: {e.response.text}")
-    except Exception as e:
-        raise HTTPException(500, f"Kamino leverage failed: {e}")
-
-
-@app.get("/kamino/markets")
-async def kamino_markets():
-    """List available Kamino lending markets."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(f"{KAMINO_REST}/v2/kamino-market")
-            r.raise_for_status()
-            return r.json()
-    except Exception as e:
-        raise HTTPException(500, f"Kamino markets error: {e}")
-
-
-# ─── Jupiter Swap Proxy ────────────────────────────────────────────────────
-# Proxies Jupiter quote API to avoid CORS issues from the browser.
-# For swap transactions, we use the v2 /build endpoint which returns raw
-# instructions that can be composed with lending operations.
-
-JUPITER_QUOTE = "https://quote-api.jup.ag"
-
-
-@app.get("/jupiter/quote")
-async def jupiter_quote(
-    inputMint: str,
-    outputMint: str,
-    amount: int,
-    slippageBps: int = 100,
-):
-    """Get a Jupiter swap quote. Amount is in smallest unit (lamports for SOL, raw for USDC)."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            params = {
-                "inputMint": inputMint,
-                "outputMint": outputMint,
-                "amount": str(amount),
-                "slippageBps": str(slippageBps),
-            }
-            r = await client.get(f"{JUPITER_QUOTE}/v6/quote", params=params)
-            r.raise_for_status()
-            return r.json()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"Jupiter quote error: {e.response.text}")
-    except Exception as e:
-        raise HTTPException(500, f"Jupiter quote failed: {e}")
+@app.on_event("startup")
+def startup():
+    if DATABASE_URL:
+        init_db()

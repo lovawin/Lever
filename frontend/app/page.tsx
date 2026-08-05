@@ -1,5 +1,6 @@
 "use client";
 
+import WalletPanel from "@/components/WalletPanel";
 import WalletBar from "@/components/WalletBar";
 import TradePanel from "@/components/TradePanel";
 import PositionsPanel from "@/components/PositionsPanel";
@@ -92,6 +93,7 @@ export default function Page() {
             selectedCoin={selectedCoin}
             onCoinChange={setSelectedCoin}
           />
+          <WalletPanel />
           <PositionsPanel />
           {showNFT && <NFTBenefits />}
         </div>
