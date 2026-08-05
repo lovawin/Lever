@@ -17,14 +17,23 @@ const HL_PERP_MEMECOINS = ["PURR", "HYPE", "WIF", "TRUMP", "kPEPE", "kBONK", "DO
 
 type TradeMode = "perps" | "spot";
 
-export default function TradePanel({ mids }: { mids: Record<string, string> }) {
+type TradePanelProps = {
+  mids: Record<string, string>;
+  selectedCoin?: string;
+  onCoinChange?: (coin: string) => void;
+};
+
+export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoinChange }: TradePanelProps) {
   const { address, isConnected: evmConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
   const { publicKey, connected: solConnected, signTransaction, sendTransaction } = useWallet();
 
   const [markets, setMarkets] = useState<PerpMarket[]>([]);
+  // Auto-detect mode based on coin — if it's in HL_PERP_MEMECOINS, use perps
   const [mode, setMode] = useState<TradeMode>("perps");
-  const [coin, setCoin] = useState("PURR");
+  const [internalCoin, setInternalCoin] = useState("PURR");
+  const coin = selectedCoinProp ?? internalCoin;
+  const setCoin = onCoinChange ?? setInternalCoin;
   const [side, setSide] = useState<"long" | "short">("long");
   const [sizeUsd, setSizeUsd] = useState(25);
   const [leverage, setLeverage] = useState(2);
@@ -230,20 +239,14 @@ export default function TradePanel({ mids }: { mids: Record<string, string> }) {
         </button>
       </div>
 
-      {/* Coin selector */}
+      {/* Coin display */}
       {mode === "perps" ? (
         <>
           <label className="block text-[10px] uppercase tracking-widest text-muted mb-1.5">Asset</label>
-          <select
-            value={coin}
-            onChange={(e) => setCoin(e.target.value)}
-            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-1 font-mono text-sm focus:outline-none focus:border-bull/50"
-          >
-            {markets.length === 0 && <option value="">loading…</option>}
-            {markets.map((m) => (
-              <option key={m.name} value={m.name}>{m.name} · up to {m.maxLeverage}x</option>
-            ))}
-          </select>
+          <div className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-1 font-mono text-sm flex items-center justify-between">
+            <span className="font-bold">{coin}</span>
+            {market && <span className="text-muted text-xs">up to {market.maxLeverage}x</span>}
+          </div>
           {mid && (
             <div className="text-xs text-bull font-mono mb-4 mt-1">
               ${midNum >= 1 ? midNum.toFixed(2) : midNum.toPrecision(4)}

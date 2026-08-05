@@ -379,6 +379,104 @@ export async function cancelOrders(
   return resp.json();
 }
 
+// ─── L2 Order Book ─────────────────────────────────────────────────────────
+
+export type L2BookLevel = {
+  px: string;   // price
+  sz: string;   // total size
+  n: number;    // number of orders
+};
+
+export type L2Book = {
+  coin: string;
+  time: number;
+  levels: [L2BookLevel[], L2BookLevel[]]; // [bids, asks]
+  spread?: string;  // only when nSigFigs is set
+};
+
+/**
+ * Fetch L2 order book for a coin.
+ * nSigFigs controls aggregation: 2=coarse, 5=fine (with mantissa 2 or 5)
+ */
+export async function getL2Book(coin: string, testnet = true, nSigFigs?: number): Promise<L2Book> {
+  const body: Record<string, unknown> = { type: "l2Book", coin };
+  if (nSigFigs) body.nSigFigs = nSigFigs;
+
+  const r = await fetch(baseUrl(testnet) + "/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`l2Book ${r.status}`);
+  return r.json();
+}
+
+// ─── Asset Contexts (funding, mark price, OI, premium) ──────────────────────
+
+export type AssetCtx = {
+  dayNtlVlm: string;    // 24h notional volume
+  funding: string;      // current funding rate
+  impactPxs: [string, string]; // [bid_impact, ask_impact]
+  markPx: string;       // mark price
+  midPx: string;         // mid price
+  openInterest: string;  // open interest in coins
+  oraclePx: string;      // oracle price
+  premium: string;       // premium component
+  prevDayPx: string;     // previous day price
+};
+
+/**
+ * Fetch meta + asset contexts for all perpetual markets.
+ * Returns [meta, assetCtxs] where assetCtxs[i] corresponds to meta.universe[i].
+ */
+export async function getMetaAndAssetCtxs(testnet = true): Promise<[
+  {
+    universe: PerpMarket[];
+    marginTables: [number, { description: string; marginTiers: { lowerBound: string; maxLeverage: number }[] }][];
+  },
+  AssetCtx[]
+]> {
+  const r = await fetch(baseUrl(testnet) + "/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "metaAndAssetCtxs" }),
+  });
+  if (!r.ok) throw new Error(`metaAndAssetCtxs ${r.status}`);
+  return r.json();
+}
+
+// ─── Funding History ────────────────────────────────────────────────────────
+
+export type FundingRateEntry = {
+  coin: string;
+  fundingRate: string;
+  premium: string;
+  time: number;  // ms timestamp
+};
+
+/**
+ * Fetch funding rate history for a coin.
+ * @param startTime - Start time in ms
+ * @param endTime - Optional end time in ms
+ */
+export async function getFundingHistory(
+  coin: string,
+  startTime: number,
+  endTime?: number,
+  testnet = true,
+): Promise<FundingRateEntry[]> {
+  const body: Record<string, unknown> = { type: "fundingHistory", coin, startTime };
+  if (endTime) body.endTime = endTime;
+
+  const r = await fetch(baseUrl(testnet) + "/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`fundingHistory ${r.status}`);
+  return r.json();
+}
+
 // ─── Update Leverage ──────────────────────────────────────────────────────
 
 export async function updateLeverage(

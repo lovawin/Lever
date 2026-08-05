@@ -4,11 +4,18 @@ import WalletBar from "@/components/WalletBar";
 import TradePanel from "@/components/TradePanel";
 import PositionsPanel from "@/components/PositionsPanel";
 import MarketTicker from "@/components/MarketTicker";
+import OrderBook from "@/components/OrderBook";
+import FundingRate from "@/components/FundingRate";
+import MemeCoinSelector from "@/components/MemeCoinSelector";
+import NFTBenefits from "@/components/NFTBenefits";
 import { useEffect, useState } from "react";
-import { getAllMids } from "@/lib/hyperliquid";
+import { getAllMids, getMeta, type PerpMarket } from "@/lib/hyperliquid";
 
 export default function Page() {
   const [mids, setMids] = useState<Record<string, string>>({});
+  const [markets, setMarkets] = useState<PerpMarket[]>([]);
+  const [selectedCoin, setSelectedCoin] = useState("PURR");
+  const [showNFT, setShowNFT] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -27,6 +34,17 @@ export default function Page() {
     return () => { alive = false; clearInterval(iv); };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const meta = await getMeta(true);
+        if (alive) setMarkets(meta.universe);
+      } catch {}
+    })();
+    return () => { alive = false; };
+  }, []);
+
   return (
     <div className="min-h-screen hero-gradient flex flex-col">
       {/* Live price ticker */}
@@ -34,39 +52,71 @@ export default function Page() {
 
       {/* Header */}
       <header className="border-b border-white/5">
-        <div className="mx-auto max-w-6xl flex items-center justify-between px-6 py-4">
+        <div className="mx-auto max-w-7xl flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl md:text-3xl font-black tracking-tight">
               Lever<span className="text-bull">.</span>
             </h1>
             <div className="hidden sm:flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-bull pulse-dot" />
-              <span className="text-[10px] uppercase tracking-widest text-muted">Live</span>
+              <span className="text-[10px] uppercase tracking-widest text-yellow-400">Testnet</span>
             </div>
           </div>
-          <WalletBar />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowNFT(!showNFT)}
+              className="text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all"
+            >
+              💎 NFT
+            </button>
+            <WalletBar />
+          </div>
         </div>
       </header>
 
       {/* Tagline */}
-      <div className="mx-auto max-w-6xl w-full px-6 pt-8 pb-2">
+      <div className="mx-auto max-w-7xl w-full px-6 pt-6 pb-2">
         <h2 className="text-xl md:text-2xl font-bold">long the runner · short the rug</h2>
-        <p className="text-sm text-muted mt-1">Perps on Hyperliquid · Spot leverage on Solana via Kamino + Jupiter. Non-custodial.</p>
+        <p className="text-sm text-muted mt-1">Meme coin perps on Hyperliquid. Non-custodial. Funding rates · Order books · Spot leverage on Solana.</p>
       </div>
 
-      {/* Main content — trade on left, positions on right */}
-      <main className="mx-auto max-w-6xl w-full px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
-        <div className="lg:col-span-5">
-          <TradePanel mids={mids} />
+      {/* Main content — 3 column layout */}
+      <main className="mx-auto max-w-7xl w-full px-6 py-4 grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
+        {/* Left: Meme coin selector */}
+        <div className="lg:col-span-3">
+          <MemeCoinSelector
+            selected={selectedCoin}
+            onSelect={setSelectedCoin}
+            mids={mids}
+          />
         </div>
-        <div className="lg:col-span-7">
+
+        {/* Center: Trade + Positions */}
+        <div className="lg:col-span-5 space-y-4">
+          <TradePanel
+            mids={mids}
+            selectedCoin={selectedCoin}
+            onCoinChange={setSelectedCoin}
+          />
           <PositionsPanel />
+        </div>
+
+        {/* Right: Order book + Funding rate */}
+        <div className="lg:col-span-4 space-y-4">
+          <OrderBook
+            coin={selectedCoin}
+            midPrice={mids[selectedCoin]}
+          />
+          <FundingRate coin={selectedCoin} />
+
+          {/* NFT Benefits panel (toggle) */}
+          {showNFT && <NFTBenefits />}
         </div>
       </main>
 
       {/* Footer */}
       <footer className="border-t border-white/5">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+        <div className="mx-auto max-w-7xl px-6 py-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
           <span>Hyperliquid testnet · MVP · not financial advice</span>
           <span>Built with 🔥</span>
         </div>
