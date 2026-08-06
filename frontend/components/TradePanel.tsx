@@ -207,9 +207,9 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
       {/* Mode description */}
       <div className="text-[10px] text-muted mb-5 px-1 leading-relaxed">
         {mode === "perps" ? (
-          <>Perpetual contracts. Long &amp; short with up to {market?.maxLeverage ?? 20}x leverage. Requires EVM wallet.</>
+          <>Perpetual contracts. Long &amp; short with up to {market?.maxLeverage ?? 20}x leverage. EVM wallet.</>
         ) : (
-          <>Leveraged spot buys on any Solana token via Kamino lending + Jupiter swap. Long only, up to 5x. Requires Solana wallet.</>
+          <>Solana perps (Drift) + leveraged spot. Long & short on Drift pairs, long-only on others. Solana wallet.</>
         )}
       </div>
 
@@ -417,7 +417,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
 
       {/* Wallet hint */}
       <div className="mt-3 text-[10px] text-muted text-center">
-        {mode === "perps" ? "EVM wallet required (MetaMask / Rabby)" : "Solana wallet required (Phantom / Solflare)"}
+        {mode === "perps" ? "EVM wallet (MetaMask/Rabby) — perps on Hyperliquid" : "Solana wallet (Phantom) — perps on Drift + spot leverage"}
       </div>
 
       {err && (

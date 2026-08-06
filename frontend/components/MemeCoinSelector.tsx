@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getMetaAndAssetCtxs, type PerpMarket, type AssetCtx } from "@/lib/hyperliquid";
+import { hasDriftPerp, getDriftMarket, DRIFT_PERP_MARKETS, getDriftMarketMeta } from "@/lib/drift";
 
 // Meme coin categories for filtering
 const MEME_CATEGORIES: Record<string, string[]> = {
@@ -11,6 +12,8 @@ const MEME_CATEGORIES: Record<string, string[]> = {
   "PolitiFi": ["TRUMP", "MELANIA", "FRED", "JEFF", "PUMP"],
   "Hot": ["BRETT", "TURBO", "MEME", "GOAT", "PNUT", "FARTCOIN"],
 };
+
+type Venue = "hl" | "drift" | "spot";
 
 type CoinInfo = {
   name: string;
@@ -22,6 +25,7 @@ type CoinInfo = {
   markPx: string;
   openInterest: string;
   isMeme: boolean;
+  venue: Venue;
 };
 
 type MemeCoinSelectorProps = {
@@ -57,6 +61,8 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
 
           if (vol === 0 && !search) continue;
 
+          // Determine venue — check if Drift also has this
+          const onDrift = hasDriftPerp(m.name);
           allCoins.push({
             name: m.name,
             maxLeverage: m.maxLeverage,
@@ -67,8 +73,29 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
             markPx: ctx.markPx || "0",
             openInterest: ctx.openInterest || "0",
             isMeme: memeSet.has(m.name) || (!majors.has(m.name) && m.maxLeverage <= 5),
+            venue: "hl",
           });
         }
+
+        // Add Drift-only meme markets (not on HL)
+        const hlNames = new Set(allCoins.map(c => c.name));
+        for (const dm of DRIFT_PERP_MARKETS) {
+          if (!hlNames.has(dm.baseAssetSymbol)) {
+            allCoins.push({
+              name: dm.baseAssetSymbol,
+              maxLeverage: getDriftMarketMeta(dm.symbol).maxLeverage,
+              szDecimals: 0,
+              dayVolume: 0,
+              funding: "0",
+              premium: "0",
+              markPx: "0",
+              openInterest: "0",
+              isMeme: dm.isMeme,
+              venue: "drift",
+            });
+          }
+        }
+
         allCoins.sort((a, b) => b.dayVolume - a.dayVolume);
         setCoins(allCoins);
       } catch {}
@@ -87,6 +114,8 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
     if (filter === "short-friendly") return parseFloat(c.funding) > 0;
     if (filter === "long-friendly") return parseFloat(c.funding) < 0;
     if (filter === "high-lev") return c.maxLeverage >= 10;
+    if (filter === "hl") return c.venue === "hl";
+    if (filter === "drift") return c.venue === "drift";
     const categoryCoins = MEME_CATEGORIES[filter];
     return categoryCoins ? categoryCoins.includes(c.name) : true;
   }).slice(0, 80);
@@ -104,6 +133,18 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
     return `${r >= 0 ? "+" : ""}${r.toFixed(2)}%`;
   }
 
+  function venueLabel(v: Venue) {
+    if (v === "hl") return "HL";
+    if (v === "drift") return "DRIFT";
+    return "SPOT";
+  }
+
+  function venueColor(v: Venue) {
+    if (v === "hl") return "text-blue-400";
+    if (v === "drift") return "text-purple-400";
+    return "text-yellow-400";
+  }
+
   const filterTabs = [
     { key: "all", label: "All" },
     { key: "memes", label: "Memes" },
@@ -111,6 +152,8 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
     { key: "short-friendly", label: "Short" },
     { key: "long-friendly", label: "Long" },
     { key: "high-lev", label: "10x+" },
+    { key: "hl", label: "HL" },
+    { key: "drift", label: "Drift" },
     ...Object.keys(MEME_CATEGORIES).map((k) => ({ key: k, label: k })),
   ];
 
@@ -161,7 +204,7 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
 
           return (
             <button
-              key={c.name}
+              key={`${c.name}-${c.venue}`}
               onClick={() => onSelect(c.name)}
               className={`w-full text-left px-3 py-2 rounded-lg transition-all ${
                 isSelected
@@ -172,6 +215,7 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-sm font-mono">{c.name}</span>
                 {c.isMeme && <span className="text-[8px] px-1 py-px rounded bg-bull/20 text-bull leading-none">MEME</span>}
+                <span className={`text-[8px] px-1 py-px rounded bg-white/5 ${venueColor(c.venue)} leading-none`}>{venueLabel(c.venue)}</span>
                 <span className="text-[10px] text-muted">{c.maxLeverage}x</span>
                 <span className="ml-auto text-xs font-mono text-white/80">
                   {mid >= 1 ? `$${mid.toFixed(2)}` : mid > 0 ? `$${mid.toPrecision(4)}` : "--"}
@@ -191,6 +235,8 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
       </div>
 
       <div className="mt-2 text-[9px] text-muted">
+        <span className="text-blue-400">HL</span> = Hyperliquid &nbsp;
+        <span className="text-purple-400">DRIFT</span> = Drift (Solana) &nbsp;
         Funding: <span className="text-bear">+longs pay</span> / <span className="text-bull">+shorts pay</span>
       </div>
     </div>
