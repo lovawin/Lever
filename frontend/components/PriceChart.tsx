@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { createChart, type IChartApi, type ISeriesApi, ColorType, type CandlestickData, type Time } from "lightweight-charts";
+import { useEffect, useRef, useState } from "react";
+import { createChart, CandlestickSeries, ColorType, type IChartApi, type ISeriesApi, type Time, type CandlestickData } from "lightweight-charts";
 
 type PriceChartProps = {
   coin: string;
@@ -11,7 +11,7 @@ type PriceChartProps = {
 // Fetch candles from HL API
 async function fetchCandles(coin: string, interval: string = "1h", startTime?: number): Promise<CandlestickData<Time>[]> {
   const now = Date.now();
-  const start = startTime || now - 7 * 24 * 60 * 60 * 1000; // default 7 days
+  const start = startTime || now - 7 * 24 * 60 * 60 * 1000;
 
   const r = await fetch("https://api.hyperliquid.xyz/info", {
     method: "POST",
@@ -55,7 +55,7 @@ const INTERVALS = [
 export default function PriceChart({ coin, height = 320 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const seriesRef = useRef<any>(null);
   const [interval, setInterval_] = useState<string>("1h");
   const [loading, setLoading] = useState(true);
 
@@ -91,7 +91,7 @@ export default function PriceChart({ coin, height = 320 }: PriceChartProps) {
       height,
     });
 
-    const series = chart.addCandlestickSeries({
+    const series = chart.addSeries(CandlestickSeries, {
       upColor: "#22c55e",
       downColor: "#ef4444",
       borderUpColor: "#22c55e",
@@ -138,7 +138,7 @@ export default function PriceChart({ coin, height = 320 }: PriceChartProps) {
     }
 
     load();
-    const iv = setInterval(load, 30_000); // refresh every 30s
+    const iv = setInterval(load, 30_000);
     return () => { alive = false; clearInterval(iv); };
   }, [coin, interval]);
 
