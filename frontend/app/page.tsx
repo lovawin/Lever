@@ -112,7 +112,7 @@ export default function Page() {
       {/* Footer */}
       <footer className="border-t border-white/5">
         <div className="mx-auto max-w-[1600px] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-          <span>Live data / Testnet trading / Platform fee: 0.10% / Withdrawals: FREE (non-custodial) / not financial advice</span>
+          <span>Live data / Testnet trading / Open+Close: 0.10% / Profit fee: 10% of gains / Withdrawals: FREE / not financial advice</span>
           <span>Lever Protocol</span>
         </div>
       </footer>

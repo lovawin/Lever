@@ -11,7 +11,7 @@ import {
   calculateLeverageMetrics,
   openLeveragePosition,
 } from "@/lib/leverage";
-import { calculateTotalFees, formatUsd, type FeeTier } from "@/lib/fees";
+import { calculateTradeFees, formatUsd, type FeeTier } from "@/lib/fees";
 
 /** All perp coins are loaded dynamically from the API */
 
@@ -352,26 +352,28 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
         </div>
         {/* Fee breakdown */}
         {(() => {
-          const fees = calculateTotalFees(notional, feeTier, false, 0);
+          const fees = calculateTradeFees(notional, sizeUsd, feeTier, 0, false, 0);
           return (
             <>
               <div className="border-t border-white/5 pt-2 mt-1" />
-              <div className="flex justify-between text-muted">
-                <span>Platform fee ({fees.leverBps === 0 ? '0' : (fees.leverBps / 100).toFixed(fees.leverBps % 1 === 0 ? 2 : 3)}%)</span>
-                <span>{fees.leverBps === 0 ? <span className="text-bull">FREE</span> : formatUsd(fees.leverFee)}</span>
-              </div>
-              <div className="flex justify-between text-muted">
-                <span>Venue fee ({(fees.venueBps / 100).toFixed(fees.venueBps % 1 === 0 ? 2 : 3)}%)</span>
-                <span>{formatUsd(fees.venueFee)}</span>
-              </div>
-              <div className="flex justify-between font-bold border-t border-white/5 pt-2">
-                <span>Total fees</span>
-                <span>{formatUsd(fees.totalFee)}</span>
-              </div>
-              <div className="flex justify-between text-muted">
-                <span>Withdrawal</span>
-                <span className="text-bull">FREE</span>
-              </div>
+              {fees.breakdown.map((item, i) => (
+                <div key={i} className={`flex justify-between ${i === 3 ? "border-t border-white/5 pt-2" : ""}`}>
+                  <span className={item.label === 'Withdrawal' || item.label === 'Profit fee' ? 'text-muted text-[11px]' : 'text-muted text-[11px]'}>
+                    {item.label}
+                    {item.label === 'Profit fee' && <span className="text-muted/60"> (winning trades only)</span>}
+                  </span>
+                  <span className={
+                    item.amount === 0 && item.rate === 'FREE' 
+                      ? 'text-bull text-[11px]' 
+                      : 'text-[11px]'
+                  }>
+                    {item.rate === 'FREE' 
+                      ? <span className="text-bull">FREE</span>
+                      : <>{item.rate} · {formatUsd(item.amount)}</>
+                    }
+                  </span>
+                </div>
+              ))}
             </>
           );
         })()}

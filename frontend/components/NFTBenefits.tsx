@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FEE_TIERS, type FeeTier, calculateTotalFees, formatUsd } from "@/lib/fees";
+import { FEE_TIERS, type FeeTier, calculateTradeFees, formatUsd } from "@/lib/fees";
 
 const TIER_INFO: Record<FeeTier, {
   name: string;
@@ -65,7 +65,7 @@ export default function NFTBenefits() {
 
   const feeConfig = FEE_TIERS[selectedTier];
   const tierInfo = TIER_INFO[selectedTier];
-  const fees = calculateTotalFees(previewUsd, selectedTier, false, 0);
+  const fees = calculateTradeFees(previewUsd, previewUsd * 2, selectedTier, 0, false, 0); // assume 2x leverage for preview
   const freeFees = calculateTotalFees(previewUsd, "free", false, 0);
 
   return (
@@ -123,22 +123,24 @@ export default function NFTBenefits() {
           </div>
         </div>
         <div className="space-y-1.5 text-xs font-mono">
-          <div className="flex justify-between">
-            <span className="text-muted">Platform fee</span>
-            <span>{feeConfig.platformFeeBps === 0 ? <span className="text-bull font-bold">FREE</span> : formatUsd(fees.leverFee)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted">Venue fee (taker)</span>
-            <span>{formatUsd(fees.venueFee)}</span>
-          </div>
-          <div className="flex justify-between font-bold border-t border-white/5 pt-1.5">
-            <span>Total</span>
-            <span>{formatUsd(fees.totalFee)}</span>
-          </div>
+          {fees.breakdown.map((item, i) => (
+            <div key={i} className={`flex justify-between ${i >= fees.breakdown.length - 2 ? 'font-bold border-t border-white/5 pt-1.5' : ''}`}>
+              <span className="text-muted">
+                {item.label}
+                {item.label === 'Profit fee' && <span className="text-muted/60"> (if win)</span>}
+              </span>
+              <span>
+                {item.rate === 'FREE' 
+                  ? <span className="text-bull">FREE</span> 
+                  : <>{item.rate} · {formatUsd(item.amount)}</>
+                }
+              </span>
+            </div>
+          ))}
           {fees.savingsVsFree > 0 && (
             <div className="flex justify-between text-bull">
               <span>You save</span>
-              <span>{formatUsd(fees.savingsVsFree)}/trade</span>
+              <span>{formatUsd(fees.savingsVsFree)}/round trip</span>
             </div>
           )}
         </div>
@@ -159,18 +161,18 @@ export default function NFTBenefits() {
           <div className="bg-white/[0.03] rounded-lg p-2.5">
             <div className="text-[9px] uppercase tracking-widest text-muted">Platform Fee</div>
             <div className="text-lg font-black" style={{ color: tierInfo.color }}>
-              {feeConfig.platformFeeBps === 0 ? "FREE" : `${feeConfig.feeDiscount}% off`}
+              {feeConfig.openCloseBps === 0 ? "FREE" : `${feeConfig.openCloseBps / 100}%`}
             </div>
             <div className="text-[10px] text-muted">
-              {feeConfig.platformFeeBps === 0 ? "Zero trading fees" : `${(feeConfig.platformFeeBps / 100).toFixed(feeConfig.platformFeeBps % 1 === 0 ? 2 : 3)}% vs 0.10%`}
+              {feeConfig.openCloseBps === 0 ? "Zero fees" : `open+close · was 0.10%`}
             </div>
           </div>
           <div className="bg-white/[0.03] rounded-lg p-2.5">
-            <div className="text-[9px] uppercase tracking-widest text-muted">Funding Rebate</div>
+            <div className="text-[9px] uppercase tracking-widest text-muted">Profit Fee</div>
             <div className="text-lg font-black" style={{ color: tierInfo.color }}>
-              {feeConfig.fundingRebate > 0 ? `+${feeConfig.fundingRebate}%` : "—"}
+              {feeConfig.profitFeePct === 0 ? "FREE" : `${feeConfig.profitFeePct}%`}
             </div>
-            <div className="text-[10px] text-muted">on funding payments</div>
+            <div className="text-[10px] text-muted">{feeConfig.profitFeePct === 0 ? "no profit cut" : "of winning trades"}</div>
           </div>
         </div>
 

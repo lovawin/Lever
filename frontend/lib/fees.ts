@@ -1,15 +1,19 @@
 /**
  * Lever Platform Fee System
  *
- * Every trade on Lever pays a platform fee. This is our fee, separate from
- * any venue (HL, Kamino, etc.) fees that are already built into execution.
+ * Three fee points:
+ *   1. Open position  — fee on notional (margin × leverage)
+ *   2. Close position  — fee on notional (same as open)
+ *   3. Profit fee       — % of realized PnL, only when positive
+ *
+ * Withdrawals are always free (non-custodial).
  *
  * Tiers:
- *   Free (no NFT)    → 0.10% platform fee
- *   Iron NFT (free)   → 0.09% (10% discount)
- *   Silver NFT        → 0.075% (25% discount)
- *   Gold NFT          → 0.05% (50% discount + 15% funding rebate)
- *   Diamond NFT       → 0.00% (100% discount + 25% funding rebate + 25% revenue share)
+ *   Free (no NFT)      → 0.10% open/close, 10% profit
+ *   Iron NFT (free)     → 0.09% open/close,  9% profit
+ *   Silver NFT          → 0.075% open/close,  7.5% profit
+ *   Gold NFT            → 0.05% open/close,   5% profit + 15% funding rebate
+ *   Diamond NFT         → 0.00% open/close,   0% profit + 25% funding rebate + 25% revenue share
  *
  * Funding rebates and revenue share are distributed from treasury to NFT holders
  * on a periodic basis (weekly).
@@ -21,162 +25,201 @@ export type FeeTier = 'free' | 'iron' | 'silver' | 'gold' | 'diamond';
 
 export const FEE_TIERS: Record<FeeTier, {
   label: string;
-  emoji: string;
-  platformFeeBps: number;     // platform fee in basis points (1 bp = 0.01%)
-  feeDiscount: number;        // discount percentage vs free tier
-  fundingRebate: number;       // % of funding fees rebated to user
+  color: string;
+  openCloseBps: number;       // fee on open & close, in bps (1 bp = 0.01%)
+  profitFeePct: number;        // % of positive PnL taken as profit fee
+  feeDiscount: number;         // discount vs free tier (for display)
+  fundingRebate: number;      // % of funding fees rebated to user
   revenueShare: number;        // % of platform revenue shared with user
-  mintPrice: string;           // ETH price to mint
-  color: string;               // tailwind color class
+  mintPrice: string;
 }> = {
   free: {
     label: 'Free',
-    emoji: '🆓',
-    platformFeeBps: 10,        // 0.10%
+    color: 'text-gray-400',
+    openCloseBps: 10,           // 0.10% on open, 0.10% on close
+    profitFeePct: 10,          // 10% of profits
     feeDiscount: 0,
     fundingRebate: 0,
     revenueShare: 0,
     mintPrice: 'Free',
-    color: 'text-gray-400',
   },
   iron: {
     label: 'Iron',
-    emoji: '🛡️',
-    platformFeeBps: 9,          // 0.09%
-    feeDiscount: 10,            // 10% off
+    color: 'text-gray-300',
+    openCloseBps: 9,            // 0.09%
+    profitFeePct: 9,
+    feeDiscount: 10,
     fundingRebate: 0,
     revenueShare: 0,
-    mintPrice: 'Free',
-    color: 'text-gray-300',
+    mintPrice: 'Free (gas only)',
   },
   silver: {
     label: 'Silver',
-    emoji: '🥈',
-    platformFeeBps: 7.5,        // 0.075%
+    color: 'text-gray-200',
+    openCloseBps: 7.5,         // 0.075%
+    profitFeePct: 7.5,
     feeDiscount: 25,
     fundingRebate: 0,
     revenueShare: 0,
     mintPrice: '0.05 ETH',
-    color: 'text-gray-200',
   },
   gold: {
     label: 'Gold',
-    emoji: '🥇',
-    platformFeeBps: 5,          // 0.05%
+    color: 'text-yellow-400',
+    openCloseBps: 5,            // 0.05%
+    profitFeePct: 5,
     feeDiscount: 50,
-    fundingRebate: 15,          // 15% of funding fees rebated
+    fundingRebate: 15,
     revenueShare: 0,
     mintPrice: '0.2 ETH',
-    color: 'text-yellow-400',
   },
   diamond: {
     label: 'Diamond',
-    emoji: '💎',
-    platformFeeBps: 0,          // 0.00% — fee-free trading
+    color: 'text-cyan-400',
+    openCloseBps: 0,            // 0.00% — fee-free
+    profitFeePct: 0,            // no profit fee
     feeDiscount: 100,
     fundingRebate: 25,
-    revenueShare: 25,           // 25% of platform revenue
+    revenueShare: 25,
     mintPrice: '1 ETH',
-    color: 'text-cyan-400',
   },
 };
 
-// ─── Fee Calculation ────────────────────────────────────────────────────────
+// ─── Fee Calculations ────────────────────────────────────────────────────────
 
 /** Treasury wallet address — platform fees get sent here */
 export const TREASURY_ADDRESS = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_TREASURY_ADDRESS) || '';
 
 /**
- * Calculate the platform fee for a trade.
- *
- * @param notionalUsd - Trade size in USD (price × size)
- * @param tier - User's fee tier
- * @returns Object with fee details
+ * Calculate opening fee.
+ * Charged on notional when opening a position.
  */
-export function calculatePlatformFee(
+export function calculateOpenFee(
   notionalUsd: number,
   tier: FeeTier = 'free',
-): {
-  feeUsd: number;
-  feeBps: number;
-  tier: FeeTier;
-  discount: number;
-} {
+): { feeUsd: number; feeBps: number } {
   const config = FEE_TIERS[tier];
-  const feeUsd = notionalUsd * (config.platformFeeBps / 10000);
-  return {
-    feeUsd,
-    feeBps: config.platformFeeBps,
-    tier,
-    discount: config.feeDiscount,
-  };
+  const feeUsd = notionalUsd * (config.openCloseBps / 10000);
+  return { feeUsd, feeBps: config.openCloseBps };
 }
 
 /**
- * Calculate the total fee breakdown for a perps trade.
- * Includes both Lever platform fee and HL's venue fee.
- *
- * @param notionalUsd - Trade size in USD
- * @param tier - User's fee tier
- * @param isMaker - Whether the order is a maker order
- * @param hlVolumeTier - HL fee tier (0-6 based on 14d volume)
+ * Calculate closing fee.
+ * Same as opening fee — charged on notional when closing.
  */
-export function calculateTotalFees(
+export function calculateCloseFee(
   notionalUsd: number,
   tier: FeeTier = 'free',
+): { feeUsd: number; feeBps: number } {
+  // Same rate as open
+  return calculateOpenFee(notionalUsd, tier);
+}
+
+/**
+ * Calculate profit fee.
+ * Only charged on realized PnL when positive (winning trade).
+ * Losing trades pay no profit fee.
+ */
+export function calculateProfitFee(
+  pnlUsd: number,
+  tier: FeeTier = 'free',
+): { feeUsd: number; feePct: number; applies: boolean } {
+  if (pnlUsd <= 0) {
+    return { feeUsd: 0, feePct: FEE_TIERS[tier].profitFeePct, applies: false };
+  }
+  const config = FEE_TIERS[tier];
+  const feeUsd = pnlUsd * (config.profitFeePct / 100);
+  return { feeUsd, feePct: config.profitFeePct, applies: true };
+}
+
+/**
+ * Full fee breakdown for a trade (open + close + profit fee).
+ * Profit fee is estimated — actual profit fee depends on realized PnL at close.
+ */
+export function calculateTradeFees(
+  notionalUsd: number,
+  marginUsd: number,
+  tier: FeeTier = 'free',
+  estimatedPnlUsd: number = 0,
   isMaker: boolean = false,
   hlVolumeTier: number = 0,
 ): {
-  leverFee: number;
-  leverBps: number;
+  // Lever fees
+  openFee: number;
+  closeFee: number;
+  openCloseBps: number;
+  profitFeePct: number;
+  estimatedProfitFee: number;
+  totalLeverFees: number;
+  // Venue fees (HL)
   venueFee: number;
   venueBps: number;
-  totalFee: number;
+  // Totals
+  totalFees: number;
   totalBps: number;
+  // Comparison
   savingsVsFree: number;
-  withdrawalFee: number; // always 0 — non-custodial
+  // Withdrawal
+  withdrawalFee: number;
+  // Breakdown for display
+  breakdown: { label: string; amount: number; rate: string }[];
 } {
-  // Spot pairs between two spot quote assets have 80% lower taker fees
-  // and maker rebates. Aligned quote assets get 20% lower taker fees.
-  // Lever platform fees are ON TOP of venue fees.
-  // Withdrawals are always free — Lever never holds your funds (non-custodial).
+  const config = FEE_TIERS[tier];
 
-  // Lever platform fee (our fee, on top of venue fees)
-  const lever = calculatePlatformFee(notionalUsd, tier);
+  // Lever fees
+  const open = calculateOpenFee(notionalUsd, tier);
+  const close = calculateCloseFee(notionalUsd, tier);
+  const profit = calculateProfitFee(estimatedPnlUsd, tier);
 
-  // HL venue fee (base rate, tier 0)
-  // Maker: 0.015% (1.5 bps), Taker: 0.045% (4.5 bps)
-  // Higher tiers reduce these based on 14d volume
+  // HL venue fees (taker by default)
   const venueFeeSchedule = [
-    { maker: 1.5, taker: 4.5 },   // tier 0 (base)
-    { maker: 1.2, taker: 4.0 },   // tier 1 (>5M)
-    { maker: 0.8, taker: 3.5 },   // tier 2 (>25M)
-    { maker: 0.4, taker: 3.0 },   // tier 3 (>100M)
-    { maker: 0.0, taker: 2.8 },   // tier 4 (>500M)
-    { maker: 0.0, taker: 2.6 },   // tier 5 (>2B)
-    { maker: 0.0, taker: 2.4 },   // tier 6 (>7B)
+    { maker: 1.5, taker: 4.5 },
+    { maker: 1.2, taker: 4.0 },
+    { maker: 0.8, taker: 3.5 },
+    { maker: 0.4, taker: 3.0 },
+    { maker: 0.0, taker: 2.8 },
+    { maker: 0.0, taker: 2.6 },
+    { maker: 0.0, taker: 2.4 },
   ];
   const hlFees = venueFeeSchedule[hlVolumeTier] || venueFeeSchedule[0];
   const venueBps = isMaker ? hlFees.maker : hlFees.taker;
   const venueFee = notionalUsd * (venueBps / 10000);
 
-  // Total
-  const totalFee = lever.feeUsd + venueFee;
-  const totalBps = lever.feeBps + venueBps;
+  // Totals
+  const totalLeverFees = open.feeUsd + close.feeUsd + (profit.applies ? profit.feeUsd : 0);
+  const totalFees = totalLeverFees + venueFee;
+  const totalBps = config.openCloseBps * 2 + venueBps; // approximate
 
-  // How much the user saves vs free tier
-  const freeTier = calculatePlatformFee(notionalUsd, 'free');
-  const savingsVsFree = freeTier.feeUsd - lever.feeUsd;
+  // Savings vs free tier
+  const freeConfig = FEE_TIERS['free'];
+  const freeOpen = notionalUsd * (freeConfig.openCloseBps / 10000);
+  const freeClose = freeOpen;
+  const freeProfit = estimatedPnlUsd > 0 ? estimatedPnlUsd * (freeConfig.profitFeePct / 100) : 0;
+  const savingsVsFree = (freeOpen + freeClose + freeProfit) - totalLeverFees;
+
+  // Breakdown for display
+  const breakdown = [
+    { label: 'Open fee', amount: open.feeUsd, rate: config.openCloseBps === 0 ? 'FREE' : `${config.openCloseBps / 100}%` },
+    { label: 'Close fee', amount: close.feeUsd, rate: config.openCloseBps === 0 ? 'FREE' : `${config.openCloseBps / 100}%` },
+    { label: 'Profit fee', amount: profit.applies ? profit.feeUsd : 0, rate: config.profitFeePct === 0 ? 'FREE' : `${config.profitFeePct}% of gains` },
+    { label: 'Venue fee (est.)', amount: venueFee, rate: `${venueBps / 100}%` },
+    { label: 'Withdrawal', amount: 0, rate: 'FREE' },
+  ];
 
   return {
-    leverFee: lever.feeUsd,
-    leverBps: lever.feeBps,
+    openFee: open.feeUsd,
+    closeFee: close.feeUsd,
+    openCloseBps: config.openCloseBps,
+    profitFeePct: config.profitFeePct,
+    estimatedProfitFee: profit.applies ? profit.feeUsd : 0,
+    totalLeverFees,
     venueFee,
     venueBps,
-    totalFee,
+    totalFees,
     totalBps,
     savingsVsFree,
-    withdrawalFee: 0, // non-custodial — we never hold your funds
+    withdrawalFee: 0,
+    breakdown,
   };
 }
 
@@ -186,29 +229,19 @@ export function calculateTotalFees(
  * For HL perps, we use Builder Codes to capture our platform fee on-chain.
  * The builder fee is included in the order action as: { b: builderAddr, f: feeBps }
  * where f is in tenths of basis points (so 0.10% = 10).
- *
- * This converts our platform fee to the HL builder fee format.
  */
 export function leverFeeToHlBuilderCode(tier: FeeTier = 'free'): {
   builderAddress: string;
-  feeTenthsOfBps: number;  // HL expects tenths of bps
+  feeTenthsOfBps: number;
 } {
   const config = FEE_TIERS[tier];
-  // Our platformFeeBps is in full bps. HL wants tenths of bps.
-  // e.g., 0.10% = 10 bps = 100 tenths-of-bps
-  // But HL max is 0.1% for perps = 10 bps = 100 tenths-of-bps
-  const feeTenthsOfBps = Math.round(config.platformFeeBps * 10);
-
+  const feeTenthsOfBps = Math.round(config.openCloseBps * 10);
   return {
     builderAddress: TREASURY_ADDRESS,
     feeTenthsOfBps,
   };
 }
 
-/**
- * Check if the builder address is configured.
- * If not, platform fees won't be captured on-chain.
- */
 export function isBuilderConfigured(): boolean {
   return TREASURY_ADDRESS.length > 0 && TREASURY_ADDRESS.startsWith('0x');
 }
