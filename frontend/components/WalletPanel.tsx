@@ -101,7 +101,7 @@ export default function WalletPanel() {
   if (!isConnected || !address) {
     return (
       <div className="glass rounded-2xl p-4">
-        <h2 className="text-sm font-bold mb-3">💰 Wallet</h2>
+        <h2 className="text-sm font-bold mb-3">Wallet</h2>
         <p className="text-xs text-muted">Connect your wallet to view balance and trade.</p>
       </div>
     );
@@ -110,7 +110,7 @@ export default function WalletPanel() {
   if (!token) {
     return (
       <div className="glass rounded-2xl p-4">
-        <h2 className="text-sm font-bold mb-3">💰 Wallet</h2>
+        <h2 className="text-sm font-bold mb-3">Wallet</h2>
         <p className="text-xs text-muted">Sign in to Lever to view your balance.</p>
         <button className="mt-3 w-full py-2 rounded-xl bg-bull text-black font-bold text-xs">
           Sign In with Wallet
@@ -122,7 +122,7 @@ export default function WalletPanel() {
   return (
     <div className="glass rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-bold">💰 Wallet</h2>
+        <h2 className="text-sm font-bold">Wallet</h2>
         {balance && (
           <span className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded bg-white/5 text-muted">
             {balance.fee_tier}
@@ -160,7 +160,7 @@ export default function WalletPanel() {
                 : "bg-white/[0.03] border border-transparent text-muted hover:text-white"
             }`}
           >
-            {t === "balance" ? "📋 Balance" : t === "deposit" ? "📥 Deposit" : "📤 Withdraw"}
+            {t === "balance" ? "Balance" : t === "deposit" ? "Deposit" : "Withdraw"}
           </button>
         ))}
       </div>

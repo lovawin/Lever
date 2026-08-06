@@ -3,13 +3,13 @@
 import { useEffect, useState } from "react";
 import { getMetaAndAssetCtxs, type PerpMarket, type AssetCtx } from "@/lib/hyperliquid";
 
-// Known meme coin categories for filtering
+// Meme coin categories for filtering
 const MEME_CATEGORIES: Record<string, string[]> = {
-  "🐕 Doge": ["DOGE", "WIF", "kBONK", "kPEPE", "kSHIB", "kFLOKI", "BONK", "FLOKI", "SHIB", "BOME"],
-  "🐱 Cat": ["PURR", "POPCAT", "CASHCAT", "MEW", "MOODENG"],
-  "🐸 Pepe": ["kPEPE", "PEPE"],
-  "🤡 PolitiFi": ["TRUMP", "MELANIA", "FRED", "JEFF", "PUMP"],
-  "🔥 Hot": ["BRETT", "TURBO", "MEME", "GOAT", "PNUT", "FARTCOIN"],
+  "Doge": ["DOGE", "WIF", "kBONK", "kPEPE", "kSHIB", "kFLOKI", "BONK", "FLOKI", "SHIB", "BOME"],
+  "Cat": ["PURR", "POPCAT", "CASHCAT", "MEW", "MOODENG"],
+  "Pepe": ["kPEPE", "PEPE"],
+  "PolitiFi": ["TRUMP", "MELANIA", "FRED", "JEFF", "PUMP"],
+  "Hot": ["BRETT", "TURBO", "MEME", "GOAT", "PNUT", "FARTCOIN"],
 };
 
 type CoinInfo = {
@@ -40,12 +40,11 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
     let alive = true;
     async function fetch() {
       try {
-        const [meta, ctxs] = await getMetaAndAssetCtxs(false); // mainnet
+        const [meta, ctxs] = await getMetaAndAssetCtxs(false);
         if (!alive) return;
         const allCoins: CoinInfo[] = [];
         const memeSet = new Set(Object.values(MEME_CATEGORIES).flat());
 
-        // Known non-meme majors
         const majors = new Set(["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOT", "AVAX", "MATIC",
           "LINK", "UNI", "AAVE", "NEAR", "ATOM", "LTC", "BCH", "ETC", "ICP", "FIL", "APT",
           "OP", "ARB", "TRX", "HBAR", "SUI", "SEI", "INJ", "TIA", "RUNE", "NEO",
@@ -56,7 +55,6 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
           const ctx = ctxs[i] || {};
           const vol = parseFloat(ctx.dayNtlVlm || "0");
 
-          // Skip zero-volume unless searching
           if (vol === 0 && !search) continue;
 
           allCoins.push({
@@ -71,7 +69,6 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
             isMeme: memeSet.has(m.name) || (!majors.has(m.name) && m.maxLeverage <= 5),
           });
         }
-        // Sort by volume descending
         allCoins.sort((a, b) => b.dayVolume - a.dayVolume);
         setCoins(allCoins);
       } catch {}
@@ -83,9 +80,7 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
   }, []);
 
   const filtered = coins.filter((c) => {
-    // Search filter
     if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
-    // Category filter
     if (filter === "all") return true;
     if (filter === "memes") return c.isMeme;
     if (filter === "hot") return c.dayVolume > 5_000_000;
@@ -94,7 +89,7 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
     if (filter === "high-lev") return c.maxLeverage >= 10;
     const categoryCoins = MEME_CATEGORIES[filter];
     return categoryCoins ? categoryCoins.includes(c.name) : true;
-  }).slice(0, 80); // Show more coins
+  }).slice(0, 80);
 
   function fmtVol(v: number) {
     if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
@@ -109,36 +104,36 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
     return `${r >= 0 ? "+" : ""}${r.toFixed(2)}%`;
   }
 
-  // Filter tabs — keep them short
   const filterTabs = [
     { key: "all", label: "All" },
-    { key: "memes", label: "🃏 Memes" },
-    { key: "hot", label: "🔥 Hot" },
-    { key: "short-friendly", label: "🔴 Short" },
-    { key: "long-friendly", label: "🟢 Long" },
-    { key: "high-lev", label: "⚡ 10x+" },
+    { key: "memes", label: "Memes" },
+    { key: "hot", label: "Hot" },
+    { key: "short-friendly", label: "Short" },
+    { key: "long-friendly", label: "Long" },
+    { key: "high-lev", label: "10x+" },
     ...Object.keys(MEME_CATEGORIES).map((k) => ({ key: k, label: k })),
   ];
 
   return (
     <div className="glass rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-bold">🎭 Markets</h2>
-        {loading && <span className="text-[10px] text-muted animate-pulse">loading…</span>}
-        {!loading && <span className="text-[10px] text-muted">{filtered.length} coins</span>}
+        <h2 className="text-sm font-bold">Markets</h2>
+        {loading ? (
+          <span className="text-[10px] text-muted animate-pulse">loading</span>
+        ) : (
+          <span className="text-[10px] text-muted">{filtered.length} markets</span>
+        )}
       </div>
 
-      {/* Search */}
       <input
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search coins…"
+        placeholder="Search..."
         className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono mb-2 focus:outline-none focus:border-bull/50 placeholder:text-muted/50"
       />
 
-      {/* Category tabs — horizontal scroll */}
-      <div className="flex gap-1 overflow-x-auto pb-2 mb-2 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
+      <div className="flex gap-1 overflow-x-auto pb-2 mb-2" style={{ scrollbarWidth: 'thin' }}>
         {filterTabs.map(({ key, label }) => (
           <button
             key={key}
@@ -154,10 +149,9 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
         ))}
       </div>
 
-      {/* Coin list */}
       <div className="max-h-[420px] overflow-y-auto space-y-0.5" style={{ scrollbarWidth: 'thin' }}>
         {filtered.length === 0 && (
-          <div className="text-xs text-muted text-center py-4">No coins match</div>
+          <div className="text-xs text-muted text-center py-4">No markets found</div>
         )}
         {filtered.map((c) => {
           const isSelected = c.name === selected;
@@ -175,22 +169,20 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
                   : "border border-transparent hover:bg-white/5"
               }`}
             >
-              {/* Top row: name + leverage badge */}
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-sm font-mono">{c.name}</span>
                 {c.isMeme && <span className="text-[8px] px-1 py-px rounded bg-bull/20 text-bull leading-none">MEME</span>}
                 <span className="text-[10px] text-muted">{c.maxLeverage}x</span>
                 <span className="ml-auto text-xs font-mono text-white/80">
-                  {mid >= 1 ? `$${mid.toFixed(2)}` : mid > 0 ? `$${mid.toPrecision(4)}` : "—"}
+                  {mid >= 1 ? `$${mid.toFixed(2)}` : mid > 0 ? `$${mid.toPrecision(4)}` : "--"}
                 </span>
               </div>
-              {/* Bottom row: funding + volume */}
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={`text-[10px] font-mono ${fundRate > 0 ? "text-bear" : fundRate < 0 ? "text-bull" : "text-muted"}`}>
-                  {fmtFunding(c.funding)} fund
+                  {fmtFunding(c.funding)}
                 </span>
                 <span className="text-[10px] text-muted font-mono">
-                  {fmtVol(c.dayVolume)} vol
+                  {fmtVol(c.dayVolume)}
                 </span>
               </div>
             </button>
@@ -198,9 +190,8 @@ export default function MemeCoinSelector({ selected, onSelect, mids }: MemeCoinS
         })}
       </div>
 
-      {/* Legend */}
-      <div className="mt-2 flex items-center gap-3 text-[9px] text-muted">
-        <span>Funding: <span className="text-bear">+longs pay</span> <span className="text-bull">+shorts pay</span></span>
+      <div className="mt-2 text-[9px] text-muted">
+        Funding: <span className="text-bear">+longs pay</span> / <span className="text-bull">+shorts pay</span>
       </div>
     </div>
   );

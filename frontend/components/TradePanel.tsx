@@ -120,7 +120,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
         if (filled) {
           setResult(`✅ Filled: ${filled.totalSz} @ $${filled.avgPx} (oid: ${filled.oid})`);
         } else if (resting) {
-          setResult(`📋 Resting order placed (oid: ${resting.oid})`);
+          setResult(`Resting order placed (oid: ${resting.oid})`);
         } else {
           setResult(`✅ Order sent: ${JSON.stringify(r).slice(0, 300)}`);
         }
@@ -190,7 +190,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
               : "bg-white/[0.03] border-white/5 text-muted hover:text-white hover:bg-white/5"
           }`}
         >
-          ⚡ Perps
+          Perps
         </button>
         <button
           onClick={() => { setMode("spot"); setSide("long"); }}
@@ -200,7 +200,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
               : "bg-white/[0.03] border-white/5 text-muted hover:text-white hover:bg-white/5"
           }`}
         >
-          🌀 Spot Leverage
+          Spot Leverage
         </button>
       </div>
 
@@ -415,7 +415,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
 
       {/* Wallet hint */}
       <div className="mt-3 text-[10px] text-muted text-center">
-        {mode === "perps" ? "⚡ EVM wallet required (MetaMask / Rabby)" : "🌀 Solana wallet required (Phantom / Solflare)"}
+        {mode === "perps" ? "EVM wallet required (MetaMask / Rabby)" : "Solana wallet required (Phantom / Solflare)"}
       </div>
 
       {err && (

@@ -14,7 +14,7 @@ const TIER_INFO: Record<FeeTier, {
 }> = {
   free: {
     name: "Free Tier",
-    emoji: "🆓",
+    emoji: "",
     color: "#888",
     mintPrice: "—",
     count: Infinity,
@@ -23,7 +23,7 @@ const TIER_INFO: Record<FeeTier, {
   },
   iron: {
     name: "Iron Levers",
-    emoji: "🛡️",
+    emoji: "",
     color: "#cd7f32",
     mintPrice: "Free (gas only)",
     count: 6000,
@@ -32,7 +32,7 @@ const TIER_INFO: Record<FeeTier, {
   },
   silver: {
     name: "Silver Levers",
-    emoji: "🥈",
+    emoji: "",
     color: "#c0c0c0",
     mintPrice: "0.05 ETH",
     count: 3000,
@@ -41,7 +41,7 @@ const TIER_INFO: Record<FeeTier, {
   },
   gold: {
     name: "Gold Levers",
-    emoji: "🥇",
+    emoji: "",
     color: "#ffd700",
     mintPrice: "0.2 ETH",
     count: 900,
@@ -50,7 +50,7 @@ const TIER_INFO: Record<FeeTier, {
   },
   diamond: {
     name: "Diamond Levers",
-    emoji: "💎",
+    emoji: "",
     color: "#b9f2ff",
     mintPrice: "1 ETH",
     count: 100,
@@ -71,7 +71,7 @@ export default function NFTBenefits() {
   return (
     <div className="glass rounded-2xl p-4">
       <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-sm font-bold">💎 NFT Benefits</h2>
+        <h2 className="text-sm font-bold">NFT Benefits</h2>
         <span className="text-[9px] uppercase tracking-widest text-muted px-2 py-0.5 rounded bg-white/5">
           Coming Soon
         </span>
@@ -97,7 +97,7 @@ export default function NFTBenefits() {
                   : "bg-white/[0.02] border border-transparent hover:bg-white/5"
               }`}
             >
-              <div className="text-base">{info.emoji}</div>
+              <div className="text-base font-bold" style={{ color: info.color }}>{cfg.label}</div>
               <div className="text-[9px] font-bold" style={{ color: info.color }}>{cfg.label}</div>
               <div className="text-[8px] text-muted">{cfg.platformFeeBps === 0 ? 'FREE' : `${cfg.platformFeeBps / 100}% fee`}</div>
             </button>
@@ -148,7 +148,7 @@ export default function NFTBenefits() {
       <div className="bg-white/5 rounded-xl p-3 space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-sm font-bold" style={{ color: tierInfo.color }}>
-            {tierInfo.emoji} {tierInfo.name}
+            {tierInfo.name}
           </span>
           {tierInfo.count !== Infinity && (
             <span className="text-xs text-muted">{tierInfo.count.toLocaleString()} available</span>
@@ -196,7 +196,7 @@ export default function NFTBenefits() {
 
       {/* Staking note */}
       <div className="mt-3 text-[10px] text-muted leading-relaxed bg-white/[0.02] rounded-lg p-2.5">
-        <strong className="text-white/70">🔥 Staking bonus:</strong> Stake your NFT for 1.5x benefits multiplier.
+        <strong className="text-white/70">Staking bonus:</strong> Stake your NFT for 1.5x benefits multiplier.
         Staked NFTs earn LEVER token emissions and unlock max tier benefits.
       </div>
     </div>

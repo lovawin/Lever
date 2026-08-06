@@ -9,6 +9,7 @@ import OrderBook from "@/components/OrderBook";
 import FundingRate from "@/components/FundingRate";
 import MemeCoinSelector from "@/components/MemeCoinSelector";
 import NFTBenefits from "@/components/NFTBenefits";
+import PriceChart from "@/components/PriceChart";
 import { useEffect, useState } from "react";
 import { getAllMids, getMeta, type PerpMarket } from "@/lib/hyperliquid";
 
@@ -22,7 +23,7 @@ export default function Page() {
     let alive = true;
     (async () => {
       try {
-        const m = await getAllMids(false); // mainnet for real prices
+        const m = await getAllMids(false);
         if (alive) setMids(m);
       } catch {}
     })();
@@ -39,7 +40,7 @@ export default function Page() {
     let alive = true;
     (async () => {
       try {
-        const meta = await getMeta(false); // mainnet for real markets
+        const meta = await getMeta(false);
         if (alive) setMarkets(meta.universe);
       } catch {}
     })();
@@ -48,7 +49,6 @@ export default function Page() {
 
   return (
     <div className="min-h-screen hero-gradient flex flex-col">
-      {/* Live price ticker */}
       <MarketTicker mids={mids} />
 
       {/* Header */}
@@ -60,7 +60,7 @@ export default function Page() {
             </h1>
             <div className="hidden sm:flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-bull pulse-dot" />
-              <span className="text-[10px] uppercase tracking-widest text-yellow-400">Live Data · Testnet Trading</span>
+              <span className="text-[10px] uppercase tracking-widest text-yellow-400">Live Data / Testnet Trading</span>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -68,16 +68,16 @@ export default function Page() {
               onClick={() => setShowNFT(!showNFT)}
               className="text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all"
             >
-              💎 NFT
+              NFT
             </button>
             <WalletBar />
           </div>
         </div>
       </header>
 
-      {/* Main content — aligned 3-column layout */}
-      <main className="mx-auto max-w-[1600px] w-full px-4 py-4 grid grid-cols-1 lg:grid-cols-[280px_1fr_320px] gap-4 flex-1 items-start">
-        {/* Left: Market selector — fixed width */}
+      {/* Main content — 3-column layout */}
+      <main className="mx-auto max-w-[1600px] w-full px-4 py-4 grid grid-cols-1 lg:grid-cols-[260px_1fr_300px] gap-4 flex-1 items-start">
+        {/* Left: Markets */}
         <div className="lg:sticky lg:top-4">
           <MemeCoinSelector
             selected={selectedCoin}
@@ -86,8 +86,9 @@ export default function Page() {
           />
         </div>
 
-        {/* Center: Trade panel — flexible width */}
+        {/* Center: Chart + Trade + Positions */}
         <div className="space-y-4">
+          <PriceChart coin={selectedCoin} />
           <TradePanel
             mids={mids}
             selectedCoin={selectedCoin}
@@ -98,7 +99,7 @@ export default function Page() {
           {showNFT && <NFTBenefits />}
         </div>
 
-        {/* Right: Order book + Funding — fixed width */}
+        {/* Right: OrderBook + Funding */}
         <div className="space-y-4">
           <OrderBook
             coin={selectedCoin}
@@ -111,8 +112,8 @@ export default function Page() {
       {/* Footer */}
       <footer className="border-t border-white/5">
         <div className="mx-auto max-w-[1600px] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-          <span>Live data · Testnet trading · Platform fee: 0.10% · Withdrawals: FREE (non-custodial) · not financial advice</span>
-          <span>Built with 🔥</span>
+          <span>Live data / Testnet trading / Platform fee: 0.10% / Withdrawals: FREE (non-custodial) / not financial advice</span>
+          <span>Lever Protocol</span>
         </div>
       </footer>
     </div>

@@ -2,7 +2,7 @@ import "./globals.css";
 import { Providers } from "@/components/Providers";
 
 export const metadata = {
-  title: "Lever — long/short memecoins",
+  title: "Lever — Long/Short Trading Platform",
   description: "Long & short any market with leverage. Order books, funding rates, spot leverage.",
 };
 
