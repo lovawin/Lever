@@ -70,7 +70,7 @@ app.add_middleware(
 HL_API_URL = os.getenv("HL_API_URL", "https://api.hyperliquid.xyz")
 HL_TESTNET_URL = os.getenv("HL_TESTNET_URL", "https://api.hyperliquid-testnet.xyz")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
-TREASURY_ADDRESS = os.getenv("TREASURY_ADDRESS", "")
+TREASURY_ADDRESS = os.getenv("TREASURY_ADDRESS", "0xdb903f520Ce8CD7E8044f497130dD75306e77725")
 HL_PRIVATE_KEY = os.getenv("HL_PRIVATE_KEY", "")
 SOL_TREASURY = os.getenv("SOL_TREASURY", "")
 SESSION_EXPIRY_SECONDS = int(os.getenv("SESSION_EXPIRY_SECONDS", "86400"))
