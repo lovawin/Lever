@@ -1,14 +1,19 @@
 """
-Lever Trading Backend — API v3.1
+Lever Trading Backend — API v4.0
 
-Security hardening:
+Arbitrum vault integration:
+- On-chain balance reads via LeverVault contract
+- Deposit address = vault contract (users deposit USDC directly)
+- Withdrawals via vault.withdraw() (always free, always possible)
+- Orders via vault.openPosition/closePosition (operator)
+- Solvency verification: anyone can check on-chain
+
+Security:
 - EVM + Solana wallet signature verification
 - CORS locked to frontend domain
-- Rate limiting (100 req/min per IP)
-- Deposit verification (on-chain tx check)
+- Rate limiting (100/min general, 10/min for orders)
 - Input validation with Pydantic
 - Session tokens with expiry
-- No secrets in code
 """
 
 import os
@@ -32,7 +37,15 @@ from slowapi.middleware import SlowAPIMiddleware
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-app = FastAPI(title="Lever Trading", version="3.1.0")
+from .vault import (
+    vault_ready, get_vault_balance, get_vault_total_deposits,
+    get_solvency_info, get_vault_fee_params, get_deposit_address as vault_deposit_address,
+    check_usdc_allowance, check_usdc_balance,
+    open_position as vault_open_position,
+    close_position as vault_close_position,
+)
+
+app = FastAPI(title="Lever Trading", version="4.0.0")
 
 # ─── Rate Limiting ───────────────────────────────────────────────────────────
 
@@ -60,8 +73,6 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 TREASURY_ADDRESS = os.getenv("TREASURY_ADDRESS", "")
 HL_PRIVATE_KEY = os.getenv("HL_PRIVATE_KEY", "")
 SOL_TREASURY = os.getenv("SOL_TREASURY", "")
-ETHEREUM_RPC = os.getenv("ETHEREUM_RPC", "https://arb1.arbitrum.io/rpc")
-SOLANA_RPC = os.getenv("SOLANA_RPC", "https://api.mainnet-beta.solana.com")
 SESSION_EXPIRY_SECONDS = int(os.getenv("SESSION_EXPIRY_SECONDS", "86400"))
 
 # ─── Fee Schedule ────────────────────────────────────────────────────────────
@@ -188,13 +199,10 @@ def init_db():
 
 # ─── Auth ────────────────────────────────────────────────────────────────────
 
-# In-memory session store (prod → Redis/DB)
 _sessions: dict[str, dict] = {}
 _nonces: dict[str, dict] = {}
 
-# EVM address regex (0x + 40 hex chars)
 EVM_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
-# Solana address regex (base58, 32-44 chars)
 SOL_ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
@@ -244,74 +252,44 @@ class SessionInfo(BaseModel):
 
 
 def verify_evm_signature(message: str, signature: str, expected_address: str) -> bool:
-    """Verify an EVM wallet signature using eth_account."""
     try:
         from eth_account import Account
         from eth_account.messages import encode_defunct
-        
         msg = encode_defunct(text=message)
         recovered = Account.recover_message(msg, signature=signature)
         return recovered.lower() == expected_address.lower()
     except ImportError:
-        # Fallback: use web3.py if eth_account not available
-        try:
-            from web3 import Web3
-            recovered = Web3().eth.account.recover_message(
-                signable_message=encode_defunct(text=message),
-                signature=signature,
-            )
-            return recovered.lower() == expected_address.lower()
-        except ImportError:
-            # No verification library — log warning
-            import logging
-            logging.getLogger("lever").warning(
-                "No EVM verification library installed. "
-                "Install eth_account: pip install eth-account"
-            )
-            return True  # Allow in dev, block in prod
+        import logging
+        logging.getLogger("lever").warning("No EVM verification library. Install eth_account.")
+        return True
     except Exception:
         return False
 
 
 def verify_sol_signature(message: str, signature: str, expected_address: str) -> bool:
-    """Verify a Solana wallet signature using nacl."""
     try:
         from nacl.signing import VerifyKey
         from nacl.exceptions import BadSignatureError
         import base58
-        
-        # Solana signatures are base58-encoded ed25519 signatures
         sig_bytes = base58.b58decode(signature)
         msg_bytes = message.encode("utf-8")
-        
-        # The public key IS the address for ed25519
         pubKey_bytes = base58.b58decode(expected_address)
         verify_key = VerifyKey(pubKey_bytes)
-        
         verify_key.verify(msg_bytes, sig_bytes)
         return True
     except ImportError:
         import logging
-        logging.getLogger("lever").warning(
-            "No Solana verification library installed. "
-            "Install: pip install PyNaCl base58"
-        )
-        return True  # Allow in dev, block in prod
+        logging.getLogger("lever").warning("No Solana verification library. Install PyNaCl + base58.")
+        return True
     except Exception:
         return False
 
 
 @app.post("/api/auth/challenge")
 async def auth_challenge(req: AuthChallenge):
-    """Generate a nonce for the user to sign."""
     nonce = secrets.token_hex(16)
     address = req.address
-    
-    _nonces[address] = {
-        "nonce": nonce,
-        "expires": time.time() + 300,  # 5 min
-    }
-    
+    _nonces[address] = {"nonce": nonce, "expires": time.time() + 300}
     message = (
         f"Lever Trading\n\n"
         f"Sign this message to verify your wallet.\n\n"
@@ -322,22 +300,16 @@ async def auth_challenge(req: AuthChallenge):
 
 @app.post("/api/auth/verify", response_model=SessionInfo)
 async def auth_verify(req: AuthVerify):
-    """Verify a signed message and issue a session token."""
     address = req.address
-    
-    # Check nonce exists and hasn't expired
     nonce_data = _nonces.get(address)
     if not nonce_data:
         raise HTTPException(400, "No challenge found. Request a new one.")
     if time.time() > nonce_data["expires"]:
         del _nonces[address]
         raise HTTPException(400, "Challenge expired. Request a new one.")
-    
-    # Verify the expected nonce is in the message
     if nonce_data["nonce"] not in req.message:
         raise HTTPException(400, "Message doesn't match challenge nonce.")
-    
-    # Verify signature based on address type
+
     verified = False
     if is_evm_address(address):
         verified = verify_evm_signature(req.message, req.signature, address)
@@ -345,29 +317,19 @@ async def auth_verify(req: AuthVerify):
         verified = verify_sol_signature(req.message, req.signature, address)
     else:
         raise HTTPException(400, "Unsupported address type")
-    
+
     if not verified:
         raise HTTPException(401, "Invalid signature.")
-    
-    # Issue session token
+
     token = secrets.token_hex(32)
-    user_info = {
-        "address": address,
-        "fee_tier": "free",  # TODO: check NFT holdings
-        "created": time.time(),
-    }
+    user_info = {"address": address, "fee_tier": "free", "created": time.time()}
     _sessions[token] = user_info
-    del _nonces[address]  # One-time use
-    
-    return SessionInfo(
-        token=token,
-        address=address,
-        fee_tier=user_info["fee_tier"],
-    )
+    del _nonces[address]
+
+    return SessionInfo(token=token, address=address, fee_tier=user_info["fee_tier"])
 
 
 def get_current_user(authorization: str = Header(None)) -> dict:
-    """Extract and validate session token."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing or invalid authorization")
     token = authorization[7:]
@@ -394,11 +356,22 @@ class BalanceResponse(BaseModel):
 @app.get("/api/balance", response_model=BalanceResponse)
 async def get_balance(user: dict = Depends(get_current_user)):
     address = user["address"]
+
+    # Read balance directly from vault contract (on-chain)
+    if vault_ready() and is_evm_address(address):
+        vault_bal = get_vault_balance(address)
+        return BalanceResponse(
+            address=address,
+            available=vault_bal,
+            locked=0.0,  # vault doesn't track locked separately
+            total=vault_bal,
+            fee_tier=user["fee_tier"],
+        )
+
+    # Fallback: in-memory (dev mode, or Solana users without vault)
     balance_key = f"balance:{address}:USDC"
-    
     if balance_key not in _sessions:
         _sessions[balance_key] = {"available": 10000.0, "locked": 0.0}
-    
     bal = _sessions[balance_key]
     return BalanceResponse(
         address=address,
@@ -414,17 +387,30 @@ async def get_balance(user: dict = Depends(get_current_user)):
 class DepositAddressResponse(BaseModel):
     address: str
     memo: str | None = None
-    network: str = "ethereum"
+    network: str = "arbitrum"
     asset: str = "USDC"
 
 
 @app.get("/api/deposit/address", response_model=DepositAddressResponse)
-async def get_deposit_address(user: dict = Depends(get_current_user)):
+async def get_deposit_address_endpoint(user: dict = Depends(get_current_user)):
+    address = user["address"]
+
+    if vault_ready() and is_evm_address(address):
+        # Vault mode: deposit directly to the vault contract
+        vault_addr = vault_deposit_address()
+        return DepositAddressResponse(
+            address=vault_addr,
+            memo=None,
+            network="arbitrum",
+            asset="USDC",
+        )
+
+    # Fallback: send to treasury wallet
     if not TREASURY_ADDRESS:
         raise HTTPException(501, "Deposit address not configured")
     return DepositAddressResponse(
         address=TREASURY_ADDRESS,
-        memo=user["address"],
+        memo=address,
         network="ethereum",
         asset="USDC",
     )
@@ -439,7 +425,6 @@ class DepositConfirmRequest(BaseModel):
         v = v.strip()
         if not v or len(v) < 10 or len(v) > 200:
             raise ValueError("Invalid transaction hash")
-        # Allow hex (EVM) or base58 (Solana)
         return v
 
     @validator("amount")
@@ -453,31 +438,33 @@ class DepositConfirmRequest(BaseModel):
 
 @app.post("/api/deposit/confirm")
 async def confirm_deposit(req: DepositConfirmRequest, user: dict = Depends(get_current_user)):
-    """Confirm a deposit. 
+    """Confirm a deposit. With vault, the on-chain deposit event is the source of truth.
     
-    Production: Verify on-chain tx — check amount, from address, confirmations.
-    MVP: Trust user-reported amount (will be replaced with on-chain verification).
-    """
+    For now, the vault contract's balance is the canonical balance — 
+    deposits happen directly on-chain (user calls deposit() on the vault).
+    This endpoint is for tracking/confirmation only."""
     address = user["address"]
+
+    if vault_ready() and is_evm_address(address):
+        # Vault mode: balance is already on-chain, just return current balance
+        vault_bal = get_vault_balance(address)
+        return {
+            "status": "confirmed",
+            "tx_hash": req.tx_hash,
+            "vault_balance": vault_bal,
+            "note": "Vault balance is read on-chain. Deposit directly to vault contract.",
+        }
+
+    # Fallback: in-memory
     balance_key = f"balance:{address}:USDC"
-    
     if balance_key not in _sessions:
         _sessions[balance_key] = {"available": 10000.0, "locked": 0.0}
-    
-    # TODO: On-chain verification
-    # 1. Look up tx_hash on EVM or Solana
-    # 2. Verify it sends USDC to TREASURY_ADDRESS
-    # 3. Verify amount matches
-    # 4. Check confirmations (6 for EVM, 32 for Solana)
-    # 5. Mark as confirmed only after safe depth
-    
     _sessions[balance_key]["available"] += req.amount
-    
     return {
         "status": "credited",
         "amount": req.amount,
         "new_balance": _sessions[balance_key]["available"],
-        "note": "MVP: deposit not yet verified on-chain. Production will verify tx.",
+        "note": "MVP: deposit not yet verified on-chain.",
     }
 
 
@@ -515,22 +502,37 @@ class WithdrawResponse(BaseModel):
 @app.post("/api/withdraw", response_model=WithdrawResponse)
 async def request_withdrawal(req: WithdrawRequest, user: dict = Depends(get_current_user)):
     address = user["address"]
+
+    if vault_ready() and is_evm_address(address):
+        # Vault mode: withdrawal happens on-chain via vault.withdraw()
+        # The frontend calls the contract directly — backend just tracks
+        vault_bal = get_vault_balance(address)
+        if req.amount > vault_bal:
+            raise HTTPException(400, f"Insufficient vault balance. Available: ${vault_bal:.2f}")
+        if req.amount < 1:
+            raise HTTPException(400, "Minimum withdrawal is $1")
+
+        withdraw_id = secrets.token_hex(8)
+        return WithdrawResponse(
+            id=withdraw_id,
+            amount=req.amount,
+            destination=req.destination,
+            status="pending_onchain",
+            fee=0.0,
+        )
+
+    # Fallback: in-memory
     balance_key = f"balance:{address}:USDC"
-    
     if balance_key not in _sessions:
         raise HTTPException(400, "No balance found")
-    
     bal = _sessions[balance_key]
     if req.amount > bal["available"]:
         raise HTTPException(400, f"Insufficient balance. Available: ${bal['available']:.2f}")
-    
-    # Minimum withdrawal check
     if req.amount < 1:
         raise HTTPException(400, "Minimum withdrawal is $1")
-    
+
     bal["available"] -= req.amount
     withdraw_id = secrets.token_hex(8)
-    
     return WithdrawResponse(
         id=withdraw_id,
         amount=req.amount,
@@ -574,39 +576,62 @@ class OrderResponse(BaseModel):
     total_deducted: float
     status: str
     fill_price: float | None = None
+    tx_hash: str | None = None
 
 
 @app.post("/api/order", response_model=OrderResponse)
 @limiter.limit("10/minute")
 async def place_order(request: Request, req: PlaceOrderRequest, user: dict = Depends(get_current_user)):
-    """Place an order. Deducts open fee + margin upfront."""
+    """Place an order. Routes through vault contract if available."""
     address = user["address"]
     tier = user.get("fee_tier", "free")
-    balance_key = f"balance:{address}:USDC"
-    
-    if balance_key not in _sessions:
-        _sessions[balance_key] = {"available": 10000.0, "locked": 0.0}
-    
-    bal = _sessions[balance_key]
-    
+
     notional = req.size_usd * req.leverage
     open_fee = calc_open_fee(notional, tier)
     venue_fee_est = calc_venue_fee(notional)
     total_deducted = req.size_usd + open_fee
-    
-    if total_deducted > bal["available"]:
-        raise HTTPException(
-            400,
-            f"Insufficient balance. Need ${total_deducted:.2f} "
-            f"(margin ${req.size_usd:.2f} + fee ${open_fee:.2f}), "
-            f"have ${bal['available']:.2f}"
-        )
-    
-    bal["available"] -= total_deducted
-    bal["locked"] += req.size_usd
-    
+
+    tx_hash = None
+
+    if vault_ready() and is_evm_address(address):
+        # Check vault balance
+        vault_bal = get_vault_balance(address)
+        if total_deducted > vault_bal:
+            raise HTTPException(
+                400,
+                f"Insufficient vault balance. Need ${total_deducted:.2f} "
+                f"(margin ${req.size_usd:.2f} + fee ${open_fee:.2f}), "
+                f"have ${vault_bal:.2f} in vault"
+            )
+
+        # Submit to vault contract via operator
+        try:
+            tx_hash = vault_open_position(
+                user_address=address,
+                margin_usd=req.size_usd,
+                open_fee_usd=open_fee,
+                coin=req.coin,
+                is_long=(req.side == "long"),
+                leverage=req.leverage,
+            )
+        except Exception as e:
+            raise HTTPException(500, f"Vault transaction failed: {str(e)}")
+    else:
+        # Fallback: in-memory balances
+        balance_key = f"balance:{address}:USDC"
+        if balance_key not in _sessions:
+            _sessions[balance_key] = {"available": 10000.0, "locked": 0.0}
+        bal = _sessions[balance_key]
+        if total_deducted > bal["available"]:
+            raise HTTPException(
+                400,
+                f"Insufficient balance. Need ${total_deducted:.2f}, have ${bal['available']:.2f}"
+            )
+        bal["available"] -= total_deducted
+        bal["locked"] += req.size_usd
+
     order_id = secrets.token_hex(8)
-    
+
     return OrderResponse(
         id=order_id,
         coin=req.coin,
@@ -617,7 +642,9 @@ async def place_order(request: Request, req: PlaceOrderRequest, user: dict = Dep
         open_fee=open_fee,
         venue_fee_est=venue_fee_est,
         total_deducted=total_deducted,
-        status="filled",
+        status="filled" if tx_hash else "pending",
+        fill_price=None,
+        tx_hash=tx_hash,
     )
 
 
@@ -636,29 +663,46 @@ class ClosePositionResponse(BaseModel):
     pnl: float
     net_payout: float
     status: str
+    tx_hash: str | None = None
 
 
 @app.post("/api/position/close", response_model=ClosePositionResponse)
 async def close_position(req: ClosePositionRequest, user: dict = Depends(get_current_user)):
     tier = user.get("fee_tier", "free")
     address = user["address"]
-    balance_key = f"balance:{address}:USDC"
-    
-    # MVP placeholders
+
+    # MVP placeholders — in production, these come from HL position data
     notional = 1000.0
     pnl = 50.0
     margin = 100.0
-    
+
     close_fee = calc_close_fee(notional, tier)
     profit_fee = calc_profit_fee(pnl, tier)
     net_payout = margin + pnl - close_fee - profit_fee
-    
-    if balance_key not in _sessions:
-        _sessions[balance_key] = {"available": 10000.0, "locked": 0.0}
-    
-    _sessions[balance_key]["available"] += net_payout
-    _sessions[balance_key]["locked"] -= margin
-    
+
+    tx_hash = None
+
+    if vault_ready() and is_evm_address(address):
+        try:
+            tx_hash = vault_close_position(
+                user_address=address,
+                margin_usd=margin,
+                pnl_usd=pnl,
+                close_fee_usd=close_fee,
+                profit_fee_usd=profit_fee,
+                coin="BTC",     # TODO: from position data
+                is_long=True,   # TODO: from position data
+            )
+        except Exception as e:
+            raise HTTPException(500, f"Vault close failed: {str(e)}")
+    else:
+        # Fallback: in-memory
+        balance_key = f"balance:{address}:USDC"
+        if balance_key not in _sessions:
+            _sessions[balance_key] = {"available": 10000.0, "locked": 0.0}
+        _sessions[balance_key]["available"] += net_payout
+        _sessions[balance_key]["locked"] -= margin
+
     return ClosePositionResponse(
         position_id=req.position_id,
         closed_size=notional,
@@ -667,6 +711,7 @@ async def close_position(req: ClosePositionRequest, user: dict = Depends(get_cur
         pnl=pnl,
         net_payout=net_payout,
         status="closed",
+        tx_hash=tx_hash,
     )
 
 
@@ -687,13 +732,53 @@ async def get_positions(user: dict = Depends(get_current_user)):
     return {"positions": [], "margin": {}}
 
 
+# ─── Vault Info ──────────────────────────────────────────────────────────────
+
+@app.get("/api/vault/info")
+async def vault_info():
+    """On-chain vault status — solvency, fees, pause state."""
+    if not vault_ready():
+        return {"status": "not_configured", "vault_address": None}
+    info = get_solvency_info()
+    params = get_vault_fee_params()
+    return {
+        "status": "active",
+        "vault_address": vault_deposit_address(),
+        "solvency": info,
+        "fee_params": params,
+    }
+
+
+@app.get("/api/vault/balance/{address}")
+async def vault_balance(address: str):
+    """Check any address's vault balance on-chain."""
+    if not vault_ready():
+        raise HTTPException(501, "Vault contract not configured")
+    if not is_evm_address(address):
+        raise HTTPException(400, "Only EVM addresses supported for vault balance")
+    balance = get_vault_balance(address)
+    wallet_balance = check_usdc_balance(address)
+    allowance = check_usdc_allowance(address)
+    return {
+        "address": address,
+        "vault_balance_usdc": balance,
+        "wallet_balance_usdc": wallet_balance,
+        "vault_allowance_usdc": allowance,
+    }
+
+
 # ─── Fee Info ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/fees")
 async def get_fee_info(user: dict = Depends(get_current_user)):
     tier = user.get("fee_tier", "free")
     rates = get_tier_rates(tier)
-    
+
+    # Merge on-chain vault fee params if available
+    vault_params = {}
+    if vault_ready():
+        vault_params = get_vault_fee_params()
+
     return {
         "tier": tier,
         "open_close_bps": rates["open_close_bps"],
@@ -705,6 +790,7 @@ async def get_fee_info(user: dict = Depends(get_current_user)):
         "venue_maker_bps": VENUE_MAKER_FEE_BPS,
         "withdrawal_fee_bps": 0,
         "withdrawal_note": "Free — Lever is non-custodial",
+        "vault_fee_params": vault_params or None,
     }
 
 
@@ -727,12 +813,12 @@ class FeePreviewRequest(BaseModel):
 async def preview_fees(req: FeePreviewRequest):
     tier = req.tier
     rates = get_tier_rates(tier)
-    
+
     open_fee = calc_open_fee(req.notional_usd, tier)
     close_fee = calc_close_fee(req.notional_usd, tier)
     profit_fee = calc_profit_fee(req.estimated_pnl_usd, tier)
     venue_fee = calc_venue_fee(req.notional_usd)
-    
+
     return {
         "tier": tier,
         "open_fee": {"amount": open_fee, "rate": f"{rates['open_close_bps'] / 100}%"},
@@ -754,11 +840,24 @@ async def preview_fees(req: FeePreviewRequest):
 
 @app.get("/health")
 def health():
+    vault_status = "not_configured"
+    vault_address = None
+    solvency = None
+    if vault_ready():
+        vault_status = "active"
+        vault_address = vault_deposit_address()
+        solvency = get_solvency_info()
+
     return {
         "ok": True,
         "service": "lever-trading",
-        "version": "3.1.0",
+        "version": "4.0.0",
         "fee_model": "open+close+profit",
+        "vault": {
+            "status": vault_status,
+            "address": vault_address,
+            "solvency": solvency,
+        },
         "default_open_close_bps": FEE_TIERS["free"]["open_close_bps"],
         "default_profit_fee_pct": FEE_TIERS["free"]["profit_fee_pct"],
         "treasury_configured": bool(TREASURY_ADDRESS),

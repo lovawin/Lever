@@ -5,5 +5,6 @@ psycopg2-binary>=2.9.9
 pydantic>=2.5.0
 slowapi>=0.5.0
 eth-account>=0.10.0
+web3>=6.15.0
 PyNaCl>=1.5.0
 base58>=2.1.1

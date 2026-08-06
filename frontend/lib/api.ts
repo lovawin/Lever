@@ -54,6 +54,7 @@ export type OrderResult = {
   total_deducted: number;
   status: string;
   fill_price: number | null;
+  tx_hash: string | null;
 };
 
 export type ClosePositionResult = {
@@ -64,6 +65,7 @@ export type ClosePositionResult = {
   pnl: number;
   net_payout: number;
   status: string;
+  tx_hash: string | null;
 };
 
 export type FeeInfo = {
@@ -235,6 +237,35 @@ export async function closePosition(
 
 export async function getPositions(): Promise<any> {
   return apiFetch("/api/positions");
+}
+
+// ─── Vault ───────────────────────────────────────────────────────────────────
+
+export type VaultInfo = {
+  status: string;
+  vault_address: string | null;
+  solvency: {
+    vault_balance: number;
+    total_deposits: number;
+    deficit: number;
+    solvent: boolean;
+  } | null;
+  fee_params: Record<string, any> | null;
+};
+
+export type VaultBalance = {
+  address: string;
+  vault_balance_usdc: number;
+  wallet_balance_usdc: number;
+  vault_allowance_usdc: number;
+};
+
+export async function getVaultInfo(): Promise<VaultInfo> {
+  return apiFetch("/api/vault/info");
+}
+
+export async function getVaultBalance(address: string): Promise<VaultBalance> {
+  return apiFetch(`/api/vault/balance/${address}`);
 }
 
 // ─── Fees ────────────────────────────────────────────────────────────────────
