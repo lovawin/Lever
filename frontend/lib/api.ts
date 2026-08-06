@@ -5,8 +5,8 @@
  * - Auth (wallet sign-in)
  * - Balance tracking
  * - Deposit/Withdraw
- * - Order placement
- * - Fee info
+ * - Order placement + close position
+ * - Fee info + preview
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://tbb-site.onrender.com";
@@ -48,24 +48,46 @@ export type OrderResult = {
   side: string;
   size_usd: number;
   leverage: number;
-  platform_fee: number;
+  notional: number;
+  open_fee: number;
   venue_fee_est: number;
-  total_fee: number;
+  total_deducted: number;
   status: string;
   fill_price: number | null;
-  fill_size: number | null;
+};
+
+export type ClosePositionResult = {
+  position_id: string;
+  closed_size: number;
+  close_fee: number;
+  profit_fee: number;
+  pnl: number;
+  net_payout: number;
+  status: string;
 };
 
 export type FeeInfo = {
   tier: FeeTier;
-  platform_fee_bps: number;
-  platform_fee_pct: number;
-  discount_pct: number;
+  open_close_bps: number;
+  open_close_pct: number;
+  profit_fee_pct: number;
   funding_rebate_pct: number;
-  venue_fee_bps: number;
+  revenue_share_pct: number;
+  venue_taker_bps: number;
+  venue_maker_bps: number;
   withdrawal_fee_bps: number;
-  withdrawal_fee_pct: number;
   withdrawal_note: string;
+};
+
+export type FeePreview = {
+  tier: FeeTier;
+  open_fee: { amount: number; rate: string };
+  close_fee: { amount: number; rate: string };
+  profit_fee: { amount: number; rate: string; applies: boolean; note: string };
+  venue_fee_est: { amount: number; rate: string };
+  total_lever_fees: number;
+  total_all_fees: number;
+  withdrawal_fee: number;
 };
 
 // ─── API Client ─────────────────────────────────────────────────────────────
@@ -194,6 +216,21 @@ export async function placeLeverOrder(
   });
 }
 
+// ─── Close Position ──────────────────────────────────────────────────────────
+
+export async function closePosition(
+  positionId: string,
+  closeSizeUsd?: number
+): Promise<ClosePositionResult> {
+  return apiFetch("/api/position/close", {
+    method: "POST",
+    body: JSON.stringify({
+      position_id: positionId,
+      close_size_usd: closeSizeUsd,
+    }),
+  });
+}
+
 // ─── Positions ───────────────────────────────────────────────────────────────
 
 export async function getPositions(): Promise<any> {
@@ -204,4 +241,21 @@ export async function getPositions(): Promise<any> {
 
 export async function getFeeInfo(): Promise<FeeInfo> {
   return apiFetch("/api/fees");
+}
+
+export async function previewFees(
+  notionalUsd: number,
+  marginUsd: number,
+  estimatedPnlUsd: number = 0,
+  tier: FeeTier = "free"
+): Promise<FeePreview> {
+  return apiFetch("/api/fees/preview", {
+    method: "POST",
+    body: JSON.stringify({
+      notional_usd: notionalUsd,
+      margin_usd: marginUsd,
+      estimated_pnl_usd: estimatedPnlUsd,
+      tier,
+    }),
+  });
 }
