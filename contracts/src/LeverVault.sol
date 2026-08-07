@@ -15,6 +15,7 @@ pragma solidity 0.8.24;
  * - Wrong tokens (non-USDC ERC-20s, ETH) are recoverable
  * - Operators can only deduct approved margin + fee amounts
  * - Fee rates are capped and cannot be set to extreme values
+ * - Fee rates can only be changed by the owner
  * - Positions are tracked on-chain so closePosition must match a real open
  * - Anyone can verify solvency on-chain (vault USDC >= totalDeposits)
  * - Two-step ownership transfer prevents accidental bricking
@@ -37,7 +38,6 @@ contract LeverVault {
     error TransferFailed();
     error NotOwner();
     error NotOperator();
-    error NotFeeController();
     error IsPaused();
     error CannotRescueUSDC();
     error FeeCapExceeded();
@@ -81,7 +81,6 @@ contract LeverVault {
     event Unpaused();
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
     event OperatorUpdated(address indexed operator, bool status);
-    event FeeControllerUpdated(address indexed oldController, address indexed newController);
     event FeeParamsUpdated(uint256 openCloseBps, uint256 profitFeeBps);
     event HLMasterUpdated(address indexed oldMaster, address indexed newMaster);
     event OwnershipProposed(address indexed proposedOwner);
@@ -104,11 +103,11 @@ contract LeverVault {
     /// @notice Minimum position margin (10 USDC)
     uint256 public constant MIN_POSITION = 10e6;
 
-    /// @notice Maximum open+close fee rate (2% = 200 bps)
-    uint256 public constant MAX_OPEN_CLOSE_BPS = 200;
+    /// @notice Maximum open+close fee rate (10% = 1000 bps)
+    uint256 public constant MAX_OPEN_CLOSE_BPS = 1000;
 
-    /// @notice Maximum profit fee rate (50%)
-    uint256 public constant MAX_PROFIT_FEE_BPS = 5000;
+    /// @notice Maximum profit fee rate (20% = 2000 bps)
+    uint256 public constant MAX_PROFIT_FEE_BPS = 2000;
 
     // ─── Structs ──────────────────────────────────────────────────────────────
 
@@ -133,18 +132,17 @@ contract LeverVault {
     /// @notice HL master account (receives margin for positions)
     address public hlMasterAccount;
 
-    /// @notice Fee controller (can update fee rates)
-    address public feeController;
-
     /// @notice Whether the contract is paused (blocks deposits/opens, NOT withdrawals)
     bool public paused;
 
     /// @notice Operators (Lever backend servers) that can place/close positions
     mapping(address => bool) public operators;
 
-    /// @notice Current fee rates
-    uint256 public openCloseFeeBps;   // e.g., 10 = 0.10%
-    uint256 public profitFeeBps;       // e.g., 1000 = 10%
+    /// @notice Open+close fee rate in bps (default: 1000 = 10%)
+    uint256 public openCloseFeeBps;
+
+    /// @notice Profit fee rate in bps (default: 500 = 5%)
+    uint256 public profitFeeBps;
 
     /// @notice Stuck ETH per sender (for recovery)
     mapping(address => uint256) public stuckETH;
@@ -172,11 +170,6 @@ contract LeverVault {
         _;
     }
 
-    modifier onlyFeeController() {
-        if (msg.sender != feeController) revert NotFeeController();
-        _;
-    }
-
     modifier whenNotPaused() {
         if (paused) revert IsPaused();
         _;
@@ -196,19 +189,17 @@ contract LeverVault {
     constructor(
         address _usdc,
         address _treasury,
-        address _feeController,
         address _hlMasterAccount,
         uint256 _openCloseFeeBps,
         uint256 _profitFeeBps
     ) {
-        if (_usdc == address(0) || _treasury == address(0) || _feeController == address(0) || _hlMasterAccount == address(0))
+        if (_usdc == address(0) || _treasury == address(0) || _hlMasterAccount == address(0))
             revert ZeroAddress();
         if (_openCloseFeeBps > MAX_OPEN_CLOSE_BPS || _profitFeeBps > MAX_PROFIT_FEE_BPS)
             revert FeeCapExceeded();
 
         USDC = IUSDC(_usdc);
         treasury = _treasury;
-        feeController = _feeController;
         hlMasterAccount = _hlMasterAccount;
         openCloseFeeBps = _openCloseFeeBps;
         profitFeeBps = _profitFeeBps;
@@ -216,7 +207,6 @@ contract LeverVault {
         _status = _NOT_ENTERED;
 
         emit TreasuryUpdated(address(0), _treasury);
-        emit FeeControllerUpdated(address(0), _feeController);
         emit HLMasterUpdated(address(0), _hlMasterAccount);
         emit FeeParamsUpdated(_openCloseFeeBps, _profitFeeBps);
     }
@@ -284,7 +274,6 @@ contract LeverVault {
     /**
      * @notice Emergency withdraw — ALWAYS works, even when paused.
      * @dev This is the escape hatch. If anything goes wrong, users can always get their USDC.
-     *      No pause check. No reentrancy concern (just a self-transfer of balance).
      */
     function emergencyWithdraw() external nonReentrant {
         uint256 amount = balances[msg.sender];
@@ -306,7 +295,7 @@ contract LeverVault {
      * @dev Only operators can call. Deducts margin + open fee from user balance.
      *      Sends margin to HL master account, fee to treasury.
      *      Creates an on-chain position record that must be closed via closePosition.
-     * @param positionId Unique identifier for this position (operator-generated, e.g. hash of trade params)
+     * @param positionId Unique identifier for this position (operator-generated)
      */
     function openPosition(
         bytes32 positionId,
@@ -319,7 +308,7 @@ contract LeverVault {
     ) external onlyOperator whenNotPaused nonReentrant {
         if (margin < MIN_POSITION) revert BelowMinimum();
         if (openFee > (margin * MAX_OPEN_CLOSE_BPS) / 10000) revert FeeCapExceeded();
-        if (positions[positionId].isOpen) revert PositionAlreadyClosed(); // positionId already used
+        if (positions[positionId].isOpen) revert PositionAlreadyClosed();
 
         uint256 total = margin + openFee;
         if (balances[user] < total) revert InsufficientBalance();
@@ -350,7 +339,7 @@ contract LeverVault {
      * @param closeFee Fee for closing position (capped at MAX_OPEN_CLOSE_BPS of position margin)
      * @param profitFee Fee on PnL (only if pnl > 0, capped at profitFeeBps of profit)
      * @param pnl Realized PnL (positive = profit, negative = loss)
-     * @param marginReturn Amount of margin being returned (must equal position margin)
+     * @param marginReturn Must equal position margin exactly
      */
     function closePosition(
         bytes32 positionId,
@@ -387,7 +376,7 @@ contract LeverVault {
             if (userReturn > totalFee) {
                 userReturn -= totalFee;
             } else {
-                userReturn = 0; // edge case: fees exceed profit + margin
+                userReturn = 0;
             }
         } else {
             // Loss — deduct from margin
@@ -484,10 +473,6 @@ contract LeverVault {
 
     /**
      * @notice Check if the vault is solvent.
-     * @return vaultBalance USDC balance of this contract
-     * @return totalDeposited Sum of all user deposits
-     * @return deficit Shortfall if insolvent (0 if solvent)
-     * @return solvent Whether vault holds enough USDC
      */
     function getSolvencyInfo() external view returns (
         uint256 vaultBalance,
@@ -540,14 +525,12 @@ contract LeverVault {
         emit OperatorUpdated(operator, status);
     }
 
-    function setFeeController(address newController) external onlyOwner {
-        if (newController == address(0)) revert ZeroAddress();
-        address old = feeController;
-        feeController = newController;
-        emit FeeControllerUpdated(old, newController);
-    }
-
-    function setFeeParams(uint256 _openCloseFeeBps, uint256 _profitFeeBps) external onlyFeeController {
+    /**
+     * @notice Update fee rates. Only owner can call.
+     * @param _openCloseFeeBps Open+close fee in basis points (max 1000 = 10%)
+     * @param _profitFeeBps Profit fee in basis points (max 2000 = 20%)
+     */
+    function setFeeParams(uint256 _openCloseFeeBps, uint256 _profitFeeBps) external onlyOwner {
         if (_openCloseFeeBps > MAX_OPEN_CLOSE_BPS) revert FeeCapExceeded();
         if (_profitFeeBps > MAX_PROFIT_FEE_BPS) revert FeeCapExceeded();
 
@@ -581,7 +564,7 @@ contract LeverVault {
     }
 
     /**
-     * @dev Legacy one-step transfer — kept for compatibility but delegates to two-step.
+     * @dev Legacy one-step transfer — delegates to two-step.
      * @notice Use proposeOwnership + acceptOwnership instead.
      */
     function transferOwnership(address newOwner) external onlyOwner {

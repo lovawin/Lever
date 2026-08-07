@@ -84,7 +84,6 @@ contract LeverVaultTest is Test {
     address public alice;
     address public bob;
     address public treasury;
-    address public feeController;
     address public hlMaster;
     address public operator;
 
@@ -95,7 +94,6 @@ contract LeverVaultTest is Test {
         alice = makeAddr("alice");
         bob = makeAddr("bob");
         treasury = makeAddr("treasury");
-        feeController = makeAddr("feeController");
         hlMaster = makeAddr("hlMaster");
         operator = makeAddr("operator");
 
@@ -105,10 +103,9 @@ contract LeverVaultTest is Test {
         vault = new LeverVault(
             address(usdc),
             treasury,
-            feeController,
             hlMaster,
-            10,    // 0.10% open+close
-            1000   // 10% profit fee
+            1000,  // 10% open+close fee
+            500    // 5% profit fee
         );
 
         vault.setOperator(operator, true);
@@ -131,10 +128,10 @@ contract LeverVaultTest is Test {
 
     // ─── Helper: open a position and return its ID ──────────────────────────
 
-    function _openPosition(uint256 margin, uint256 openFee) internal returns (bytes32) {
-        bytes32 positionId = keccak256(abi.encodePacked(alice, margin, block.timestamp));
+    function _openPosition(address user, uint256 margin, uint256 openFee) internal returns (bytes32) {
+        bytes32 positionId = keccak256(abi.encodePacked(user, margin, openFee, block.timestamp));
         vm.prank(operator);
-        vault.openPosition(positionId, alice, margin, openFee, "BTC", true, 5);
+        vault.openPosition(positionId, user, margin, openFee, "BTC", true, 5);
         return positionId;
     }
 
@@ -231,7 +228,6 @@ contract LeverVaultTest is Test {
         vault.pause();
         assertTrue(vault.paused());
 
-        // emergencyWithdraw works even when paused
         vm.prank(alice);
         vault.emergencyWithdraw();
 
@@ -246,7 +242,6 @@ contract LeverVaultTest is Test {
 
         vault.pause();
 
-        // Regular withdraw also works when paused (intentional design)
         vm.prank(alice);
         vault.withdraw(5_000e6);
 
@@ -265,14 +260,14 @@ contract LeverVaultTest is Test {
         assertEq(vault.balances(alice), 0);
     }
 
-    // ─── Position Tracking (P0) ─────────────────────────────────────────────
+    // ─── Position Tracking ──────────────────────────────────────────────────
 
     function test_OpenPositionCreatesOnChainRecord() public {
         vm.prank(alice);
         vault.deposit(DEPOSIT_AMOUNT);
 
         uint256 margin = 1_000e6;
-        uint256 openFee = 1e6;
+        uint256 openFee = 100e6; // 10% of margin
         bytes32 positionId = keccak256("pos1");
 
         vm.prank(operator);
@@ -292,15 +287,15 @@ contract LeverVaultTest is Test {
         bytes32 positionId = keccak256("pos1");
 
         vm.prank(operator);
-        vault.openPosition(positionId, alice, 1_000e6, 1e6, "BTC", true, 5);
+        vault.openPosition(positionId, alice, 1_000e6, 100e6, "BTC", true, 5);
 
-        // Second open with same ID should fail
+        // Re-deposit so alice has balance again
         vm.prank(alice);
         vault.deposit(DEPOSIT_AMOUNT);
 
         vm.prank(operator);
         vm.expectRevert(LeverVault.PositionAlreadyClosed.selector);
-        vault.openPosition(positionId, alice, 1_000e6, 1e6, "ETH", false, 3);
+        vault.openPosition(positionId, alice, 1_000e6, 100e6, "ETH", false, 3);
     }
 
     function test_ClosePositionValidatesPositionExists() public {
@@ -317,12 +312,12 @@ contract LeverVaultTest is Test {
 
         bytes32 positionId = keccak256("pos1");
         vm.prank(operator);
-        vault.openPosition(positionId, alice, 1_000e6, 1e6, "BTC", true, 5);
+        vault.openPosition(positionId, alice, 1_000e6, 100e6, "BTC", true, 5);
 
         // Trying to close with wrong marginReturn should fail
         vm.prank(operator);
         vm.expectRevert(LeverVault.PositionNotFound.selector);
-        vault.closePosition(positionId, 0, 0, 0, 999e6, "pos1"); // 999 != 1000
+        vault.closePosition(positionId, 0, 0, 0, 999e6, "pos1");
     }
 
     function test_ClosePositionMarksClosed() public {
@@ -331,12 +326,11 @@ contract LeverVaultTest is Test {
 
         bytes32 positionId = keccak256("pos1");
         vm.prank(operator);
-        vault.openPosition(positionId, alice, 1_000e6, 1e6, "BTC", true, 5);
+        vault.openPosition(positionId, alice, 1_000e6, 100e6, "BTC", true, 5);
 
         vm.prank(operator);
         vault.closePosition(positionId, 0, 0, 0, 1_000e6, "pos1");
 
-        // Position should now be closed
         (,, , bool isOpen) = vault.positions(positionId);
         assertFalse(isOpen);
 
@@ -346,7 +340,7 @@ contract LeverVaultTest is Test {
         vault.closePosition(positionId, 0, 0, 0, 1_000e6, "pos1");
     }
 
-    // ─── Close Fee Cap (P0) ─────────────────────────────────────────────────
+    // ─── Close Fee Cap ─────────────────────────────────────────────────────
 
     function test_ClosePositionCapsCloseFee() public {
         vm.prank(alice);
@@ -355,12 +349,11 @@ contract LeverVaultTest is Test {
         uint256 margin = 1_000e6;
         bytes32 positionId = keccak256("pos1");
         vm.prank(operator);
-        vault.openPosition(positionId, alice, margin, 1e6, "BTC", true, 5);
+        vault.openPosition(positionId, alice, margin, 100e6, "BTC", true, 5);
 
-        // closeFee cannot exceed MAX_OPEN_CLOSE_BPS (2%) of position margin
-        uint256 maxCloseFee = (margin * 200) / 10000; // 20e6 = 2% of 1000e6
+        // closeFee at exactly 10% cap should work
+        uint256 maxCloseFee = (margin * 1000) / 10000; // 100e6 = 10% of 1000
 
-        // Exactly at cap should work
         vm.prank(operator);
         vault.closePosition(positionId, maxCloseFee, 0, 0, margin, "pos1");
     }
@@ -372,10 +365,10 @@ contract LeverVaultTest is Test {
         uint256 margin = 1_000e6;
         bytes32 positionId = keccak256("pos1");
         vm.prank(operator);
-        vault.openPosition(positionId, alice, margin, 1e6, "BTC", true, 5);
+        vault.openPosition(positionId, alice, margin, 100e6, "BTC", true, 5);
 
-        // closeFee above 2% of margin should fail
-        uint256 excessiveCloseFee = (margin * 201) / 10000; // just over cap
+        // closeFee above 10% of margin should fail
+        uint256 excessiveCloseFee = (margin * 1001) / 10000;
 
         vm.prank(operator);
         vm.expectRevert(LeverVault.FeeCapExceeded.selector);
@@ -389,15 +382,13 @@ contract LeverVaultTest is Test {
         uint256 margin = 1_000e6;
         bytes32 positionId = keccak256("pos1");
         vm.prank(operator);
-        vault.openPosition(positionId, alice, margin, 1e6, "BTC", true, 5);
+        vault.openPosition(positionId, alice, margin, 100e6, "BTC", true, 5);
 
-        // Fund hlMaster so closePosition can transfer
-        uint256 profit = 100e6; // 100 USDC profit
+        uint256 profit = 100e6;
         usdc.mint(hlMaster, margin + profit);
 
-        // profitFee exceeding profitFeeBps of profit should fail
-        // profitFeeBps = 1000 (10%), so max profitFee on 100 USDC profit = 10 USDC
-        uint256 excessiveProfitFee = 11e6; // 11% of profit
+        // profitFeeBps = 500 (5%), so max profitFee on 100 USDC = 5 USDC
+        uint256 excessiveProfitFee = 6e6; // 6% of profit, over 5% cap
 
         vm.prank(operator);
         vm.expectRevert(LeverVault.FeeCapExceeded.selector);
@@ -411,10 +402,9 @@ contract LeverVaultTest is Test {
         vault.deposit(DEPOSIT_AMOUNT);
 
         uint256 margin = 1_000e6;
-        uint256 openFee = 1e6;
+        uint256 openFee = 100e6; // 10% of margin
         bytes32 positionId = keccak256("profit_pos");
 
-        // Open
         vm.prank(operator);
         vault.openPosition(positionId, alice, margin, openFee, "BTC", true, 5);
 
@@ -424,15 +414,14 @@ contract LeverVaultTest is Test {
         uint256 profit = 100e6;
         usdc.mint(hlMaster, margin + profit);
 
-        // Close with profit
-        uint256 closeFee = 1e6;
-        uint256 profitFee = 10e6; // 10% of 100 USDC profit
+        uint256 closeFee = 10e6;  // 1% of margin
+        uint256 profitFee = 5e6;   // 5% of 100 USDC profit
 
         uint256 aliceBalBefore = vault.balances(alice);
         vm.prank(operator);
         vault.closePosition(positionId, closeFee, profitFee, int256(profit), margin, "profit_pos");
 
-        // Alice should get: margin + profit - closeFee - profitFee = 1000 + 100 - 1 - 10 = 1089 USDC
+        // Alice gets: margin + profit - closeFee - profitFee = 1000 + 100 - 10 - 5 = 1085
         uint256 expectedReturn = margin + profit - closeFee - profitFee;
         assertEq(vault.balances(alice), aliceBalBefore + expectedReturn);
     }
@@ -442,32 +431,29 @@ contract LeverVaultTest is Test {
         vault.deposit(DEPOSIT_AMOUNT);
 
         uint256 margin = 1_000e6;
-        uint256 openFee = 1e6;
+        uint256 openFee = 100e6;
         bytes32 positionId = keccak256("loss_pos");
 
-        // Open
         vm.prank(operator);
         vault.openPosition(positionId, alice, margin, openFee, "ETH", false, 3);
 
-        // Fund hlMaster for close (margin - loss)
-        uint256 loss = 200e6;
-        // hlMaster already has funds from setUp, margin - loss = 800 USDC returned
-        usdc.mint(hlMaster, margin); // ensure enough
+        // Fund hlMaster
+        usdc.mint(hlMaster, margin);
 
-        // Close with loss
-        uint256 closeFee = 1e6;
+        uint256 loss = 200e6;
+        uint256 closeFee = 10e6;
         int256 pnl = -int256(loss);
 
         uint256 aliceBalBefore = vault.balances(alice);
         vm.prank(operator);
         vault.closePosition(positionId, closeFee, 0, pnl, margin, "loss_pos");
 
-        // Alice should get: margin - loss - closeFee = 1000 - 200 - 1 = 799 USDC
+        // Alice gets: margin - loss - closeFee = 1000 - 200 - 10 = 790
         uint256 expectedReturn = margin - loss - closeFee;
         assertEq(vault.balances(alice), aliceBalBefore + expectedReturn);
     }
 
-    // ─── Operator Cannot Double-Close (P0) ────────────────────────────────────
+    // ─── Double-Close Prevention ──────────────────────────────────────────────
 
     function test_RevertDoubleClose() public {
         vm.prank(alice);
@@ -475,19 +461,15 @@ contract LeverVaultTest is Test {
 
         bytes32 positionId = keccak256("double_close");
         vm.prank(operator);
-        vault.openPosition(positionId, alice, 1_000e6, 1e6, "BTC", true, 5);
+        vault.openPosition(positionId, alice, 1_000e6, 100e6, "BTC", true, 5);
 
-        // First close succeeds
         vm.prank(operator);
         vault.closePosition(positionId, 0, 0, 0, 1_000e6, "double_close");
 
-        // Second close fails — position already closed
         vm.prank(operator);
         vm.expectRevert(LeverVault.PositionNotFound.selector);
         vault.closePosition(positionId, 0, 0, 0, 1_000e6, "double_close");
     }
-
-    // ─── Operator Cannot Fabricate Close (P0) ─────────────────────────────────
 
     function test_RevertCloseNonexistentPosition() public {
         vm.prank(operator);
@@ -574,7 +556,7 @@ contract LeverVaultTest is Test {
 
         vm.prank(operator);
         vm.expectRevert(LeverVault.IsPaused.selector);
-        vault.openPosition(keccak256("pos1"), alice, 1_000e6, 1e6, "BTC", true, 5);
+        vault.openPosition(keccak256("pos1"), alice, 1_000e6, 100e6, "BTC", true, 5);
     }
 
     function test_PauseBlocksClosePosition() public {
@@ -583,7 +565,7 @@ contract LeverVaultTest is Test {
 
         bytes32 positionId = keccak256("pos1");
         vm.prank(operator);
-        vault.openPosition(positionId, alice, 1_000e6, 1e6, "BTC", true, 5);
+        vault.openPosition(positionId, alice, 1_000e6, 100e6, "BTC", true, 5);
 
         vault.pause();
 
@@ -613,36 +595,39 @@ contract LeverVaultTest is Test {
         vault.setTreasury(address(0));
     }
 
-    function test_SetFeeParams() public {
-        vm.prank(feeController);
-        vault.setFeeParams(20, 500);
+    // ─── Fee Params (Owner Only) ─────────────────────────────────────────────
 
-        assertEq(vault.openCloseFeeBps(), 20);
-        assertEq(vault.profitFeeBps(), 500);
+    function test_SetFeeParamsOwner() public {
+        vault.setFeeParams(500, 1000); // 5% open+close, 10% profit
+
+        assertEq(vault.openCloseFeeBps(), 500);
+        assertEq(vault.profitFeeBps(), 1000);
     }
 
     function test_RevertSetFeeParamsAboveCap() public {
-        vm.prank(feeController);
         vm.expectRevert(LeverVault.FeeCapExceeded.selector);
-        vault.setFeeParams(300, 1000);
+        vault.setFeeParams(1001, 500); // 10.01% open+close exceeds cap
     }
 
-    function test_RevertSetFeeParamsNotController() public {
+    function test_RevertSetFeeParamsProfitAboveCap() public {
+        vm.expectRevert(LeverVault.FeeCapExceeded.selector);
+        vault.setFeeParams(500, 2001); // 20.01% profit exceeds cap
+    }
+
+    function test_RevertSetFeeParamsNotOwner() public {
         vm.prank(alice);
-        vm.expectRevert(LeverVault.NotFeeController.selector);
+        vm.expectRevert(LeverVault.NotOwner.selector);
         vault.setFeeParams(5, 500);
     }
 
-    // ─── Two-Step Ownership Transfer (P1) ─────────────────────────────────────
+    // ─── Two-Step Ownership Transfer ──────────────────────────────────────────
 
     function test_TwoStepOwnershipTransfer() public {
         address newOwner = makeAddr("newOwner");
 
-        // Step 1: propose
         vault.proposeOwnership(newOwner);
         assertEq(vault.proposedOwner(), newOwner);
 
-        // Step 2: accept
         vm.prank(newOwner);
         vault.acceptOwnership();
         assertEq(vault.owner(), newOwner);
@@ -658,12 +643,10 @@ contract LeverVaultTest is Test {
     function test_TransferOwnershipNowUsesTwoStep() public {
         address newOwner = makeAddr("newOwner2");
 
-        // transferOwnership now proposes instead of immediate transfer
         vault.transferOwnership(newOwner);
         assertEq(vault.proposedOwner(), newOwner);
-        assertEq(vault.owner(), address(this)); // owner unchanged
+        assertEq(vault.owner(), address(this));
 
-        // New owner must accept
         vm.prank(newOwner);
         vault.acceptOwnership();
         assertEq(vault.owner(), newOwner);
@@ -671,22 +654,12 @@ contract LeverVaultTest is Test {
 
     function test_RevertProposeOwnershipSameAddress() public {
         vm.expectRevert(LeverVault.SameAddress.selector);
-        vault.proposeOwnership(address(this)); // owner proposing themselves
+        vault.proposeOwnership(address(this));
     }
 
     function test_RevertProposeOwnershipZero() public {
         vm.expectRevert(LeverVault.ZeroAddress.selector);
         vault.proposeOwnership(address(0));
-    }
-
-    // ─── Reentrancy Guard (P1) ────────────────────────────────────────────────
-
-    function test_RevertReentrancyOnDeposit() public {
-        // This is a basic check that nonReentrant modifier is applied
-        // A full reentrancy test would require a malicious contract
-        vm.prank(alice);
-        vault.deposit(DEPOSIT_AMOUNT);
-        assertEq(vault.balances(alice), DEPOSIT_AMOUNT);
     }
 
     // ─── Open Position Tests ──────────────────────────────────────────────────
@@ -696,7 +669,7 @@ contract LeverVaultTest is Test {
         vault.deposit(DEPOSIT_AMOUNT);
 
         uint256 margin = 1_000e6;
-        uint256 openFee = 1e6;
+        uint256 openFee = 100e6; // 10% of margin
 
         uint256 treasuryBalBefore = usdc.balanceOf(treasury);
 
@@ -714,7 +687,7 @@ contract LeverVaultTest is Test {
 
         vm.prank(bob);
         vm.expectRevert(LeverVault.NotOperator.selector);
-        vault.openPosition(keccak256("pos"), alice, 1_000e6, 2e6, "BTC", true, 5);
+        vault.openPosition(keccak256("pos"), alice, 1_000e6, 100e6, "BTC", true, 5);
     }
 
     function test_RevertOpenPositionInsufficientBalance() public {
@@ -730,12 +703,36 @@ contract LeverVaultTest is Test {
         vm.prank(alice);
         vault.deposit(DEPOSIT_AMOUNT);
 
-        // openFee cannot exceed 2% of margin
+        // openFee cannot exceed 10% of margin
         uint256 margin = 1_000e6;
-        uint256 excessiveOpenFee = (margin * 201) / 10000; // just over 2%
+        uint256 excessiveOpenFee = (margin * 1001) / 10000;
 
         vm.prank(operator);
         vm.expectRevert(LeverVault.FeeCapExceeded.selector);
         vault.openPosition(keccak256("pos"), alice, margin, excessiveOpenFee, "BTC", true, 5);
+    }
+
+    // ─── Constructor Fee Caps ─────────────────────────────────────────────────
+
+    function test_RevertConstructorOpenCloseFeeAboveCap() public {
+        vm.expectRevert(LeverVault.FeeCapExceeded.selector);
+        new LeverVault(
+            address(usdc),
+            treasury,
+            hlMaster,
+            1001,  // 10.01% — over MAX_OPEN_CLOSE_BPS
+            500
+        );
+    }
+
+    function test_RevertConstructorProfitFeeAboveCap() public {
+        vm.expectRevert(LeverVault.FeeCapExceeded.selector);
+        new LeverVault(
+            address(usdc),
+            treasury,
+            hlMaster,
+            1000,
+            2001   // 20.01% — over MAX_PROFIT_FEE_BPS
+        );
     }
 }
