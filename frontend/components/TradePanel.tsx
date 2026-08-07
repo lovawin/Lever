@@ -141,11 +141,15 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
           throw new Error("Wallet does not support transaction signing. Use Phantom or Solflare.");
         }
 
+        // Convert USD amount to SOL amount for Kamino deposit
+        const solPrice = parseFloat(mids["SOL"] ?? mids["sOL"] ?? "150");
+        const collateralSol = sizeUsd / solPrice;
+
         const { signatures, steps } = await openLeveragePosition({
           walletAddress: publicKey.toBase58(),
           walletAdapter,
           connection,
-          collateralUsd: sizeUsd,
+          collateralSol,
           leverage: levCapped,
           targetMint: selectedToken.mint,
           slippagePercent: 1,

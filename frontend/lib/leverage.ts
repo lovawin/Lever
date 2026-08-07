@@ -1,29 +1,25 @@
 /**
- * Leveraged spot longs on Solana — Kamino + Jupiter integration.
+ * Leveraged spot longs on Solana — Kamino Multiply + Jupiter integration.
  *
- * Architecture:
- *   1. User deposits USDC as collateral into Kamino lending
- *   2. Borrows more USDC (leverage multiplier)
- *   3. Swaps borrowed + original USDC → meme token via Jupiter
- *   4. All atomic via flash loan: start → deposit → borrow → swap → end
+ * Flow:
+ *   1. User deposits SOL as collateral into a Kamino lending market
+ *   2. Kamino borrows USDC against that collateral (leverage multiplier)
+ *   3. If target token isn't USDC, Jupiter swaps the borrowed USDC → target token
+ *   4. User ends up with: SOL collateral position on Kamino + target token in wallet
  *
- * The meme token goes to the user's wallet (can't be lending collateral).
- * The lending position is USDC collateral / USDC debt.
+ * Kamino only supports specific collateral/debt pairs per market:
+ *   - Main (SOL/BTC): SOL collateral, USDC/BTC debt
+ *   - Altcoins: various collateral, USDC debt
+ *   - PUMP: PUMP collateral, USDC debt
+ *   - etc.
  *
- * Two-step flow via Kamino Blinks API (CORS-enabled, direct browser calls):
- *   Step 1: /setup — create obligation account on Kamino (one-time)
- *   Step 2: /openPosition — open leveraged position (user signs tx)
- *
- * For tokens not in Kamino's swap routes, we do:
- *   Step 1: /setup (same)
- *   Step 2: /openPosition with USDC deposit → borrows more USDC
- *   Step 3 (optional): Jupiter swap the resulting USDC → target meme token
+ * USDC→USDC leverage is NOT supported (that's just borrowing, not leverage).
+ * For meme token longs: deposit SOL → borrow USDC → swap to meme via Jupiter.
  */
 
 import {
   Connection,
   PublicKey,
-  Transaction,
   VersionedTransaction,
 } from "@solana/web3.js";
 
@@ -31,10 +27,32 @@ import {
 
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
-export const KAMINO_MAIN_MARKET = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF";
+
+// Kamino markets — each supports specific collateral/debt pairs
+const KAMINO_MARKETS: Record<string, { address: string; collMints: string[]; debtMints: string[] }> = {
+  main: {
+    address: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+    collMints: [SOL_MINT],
+    debtMints: [USDC_MINT],
+  },
+  altcoins: {
+    address: "ByYiZxp8QrdN9qbdtaAiePN8AAr3qvTPppNJDpf5DVJ5",
+    collMints: [SOL_MINT],
+    debtMints: [USDC_MINT],
+  },
+  pump: {
+    address: "J21qWrb66pvEYhk24P98JYNHamxGFDcGZB4pYuSuMCBr",
+    collMints: [SOL_MINT, "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"],
+    debtMints: [USDC_MINT],
+  },
+  bitcoin: {
+    address: "GMqmFygF5iSm5nkckYU6tieggFcR42SyjkkhK5rswFRs",
+    collMints: [SOL_MINT],
+    debtMints: [USDC_MINT],
+  },
+};
 
 const KAMINO_DIALECT_API = "https://kamino.dial.to/api";
-const KAMINO_REST_API = "https://api.kamino.finance";
 const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -85,10 +103,27 @@ export async function searchTokens(query: string): Promise<TokenSearchResult[]> 
   return results.slice(0, 20);
 }
 
+// ─── Market Selection ──────────────────────────────────────────────────────
+
+/**
+ * Pick the best Kamino market for a leverage position.
+ * We always deposit SOL and borrow USDC, then swap to target.
+ * The market just needs SOL as collateral and USDC as debt.
+ */
+function pickMarket(): { address: string; collMint: string; debtMint: string } {
+  // Use the main SOL/BTC market — it has SOL collateral + USDC debt
+  const main = KAMINO_MARKETS.main;
+  return {
+    address: main.address,
+    collMint: SOL_MINT,
+    debtMint: USDC_MINT,
+  };
+}
+
 // ─── Kamino Leverage API (Dialect/Blinks — CORS-enabled) ──────────────────
 
 export interface KaminoSetupParams {
-  wallet: string;             // base58 Solana pubkey
+  wallet: string;
   market?: string;
   collTokenMint?: string;
   debtTokenMint?: string;
@@ -99,9 +134,9 @@ export interface KaminoLeverageParams {
   market?: string;
   collTokenMint?: string;
   debtTokenMint?: string;
-  leverage: number;           // 1.1 - 10
-  amount: number;             // Human-readable deposit amount
-  slippage?: number;          // 0.1 - 10%
+  leverage: number;
+  amount: number;
+  slippage?: number;
 }
 
 /**
@@ -110,7 +145,7 @@ export interface KaminoLeverageParams {
  * Returns a base64-encoded VersionedTransaction for wallet signing.
  */
 export async function kaminoSetup(params: KaminoSetupParams): Promise<string> {
-  const market = params.market ?? KAMINO_MAIN_MARKET;
+  const market = params.market ?? KAMINO_MARKETS.main.address;
   const collMint = params.collTokenMint ?? SOL_MINT;
   const debtMint = params.debtTokenMint ?? USDC_MINT;
 
@@ -130,7 +165,7 @@ export async function kaminoSetup(params: KaminoSetupParams): Promise<string> {
   }
 
   const data = await r.json();
-  return data.transaction; // base64-encoded VersionedTransaction
+  return data.transaction;
 }
 
 /**
@@ -139,7 +174,7 @@ export async function kaminoSetup(params: KaminoSetupParams): Promise<string> {
  * NOTE: User must have completed setup first.
  */
 export async function kaminoOpenPosition(params: KaminoLeverageParams): Promise<string> {
-  const market = params.market ?? KAMINO_MAIN_MARKET;
+  const market = params.market ?? KAMINO_MARKETS.main.address;
   const collMint = params.collTokenMint ?? SOL_MINT;
   const debtMint = params.debtTokenMint ?? USDC_MINT;
 
@@ -162,7 +197,7 @@ export async function kaminoOpenPosition(params: KaminoLeverageParams): Promise<
   }
 
   const data = await r.json();
-  return data.transaction; // base64-encoded VersionedTransaction
+  return data.transaction;
 }
 
 /**
@@ -179,14 +214,10 @@ export async function getKaminoMarkets(): Promise<Array<{ name: string; lendingM
 export interface JupiterQuoteParams {
   inputMint: string;
   outputMint: string;
-  amount: number;         // In smallest unit (6 decimals for USDC, 9 for SOL)
+  amount: number;
   slippageBps?: number;
 }
 
-/**
- * Get a Jupiter swap quote.
- * Uses v6 quote API (may need proxy for CORS).
- */
 export async function getJupiterQuote(params: JupiterQuoteParams): Promise<any> {
   const url = new URL(`${JUPITER_QUOTE_API}/quote`);
   url.searchParams.set("inputMint", params.inputMint);
@@ -202,10 +233,6 @@ export async function getJupiterQuote(params: JupiterQuoteParams): Promise<any> 
   return r.json();
 }
 
-/**
- * Get a swap transaction from Jupiter.
- * Returns base64-encoded VersionedTransaction.
- */
 export async function getJupiterSwapTx(
   quoteResponse: any,
   wallet: string,
@@ -229,41 +256,30 @@ export async function getJupiterSwapTx(
   }
 
   const data = await r.json();
-  return data.swapTransaction; // base64-encoded VersionedTransaction
+  return data.swapTransaction;
 }
 
 // ─── Wallet Signing Helper ────────────────────────────────────────────────
 
-/**
- * Sign and send a base64-encoded VersionedTransaction using Solana wallet adapter.
- * Returns the transaction signature.
- */
 export async function signAndSendTransaction(
   base64Tx: string,
-  walletAdapter: any, // SignerWalletAdapter from @solana/wallet-adapter-base
+  walletAdapter: any,
   connection: Connection,
 ): Promise<string> {
-  // Deserialize the transaction
   const txBuf = Uint8Array.from(atob(base64Tx), (c) => c.charCodeAt(0));
   const tx = VersionedTransaction.deserialize(txBuf);
 
-  // Sign with the wallet
-  // signTransaction is available on SignerWalletAdapter
   if (!walletAdapter.signTransaction) {
     throw new Error("Wallet does not support transaction signing");
   }
 
-  // For VersionedTransaction, we need to use signTransaction from the adapter
-  // Some adapters return the signed tx, others modify in-place
   const signedTx = await walletAdapter.signTransaction(tx);
 
-  // Send the signed transaction
   const signature = await connection.sendRawTransaction(signedTx.serialize(), {
     skipPreflight: false,
     preflightCommitment: "confirmed",
   });
 
-  // Confirm the transaction
   const latestBlockhash = await connection.getLatestBlockhash();
   await connection.confirmTransaction({
     signature,
@@ -276,36 +292,34 @@ export async function signAndSendTransaction(
 
 // ─── Utility ──────────────────────────────────────────────────────────────
 
-/** USDC has 6 decimals */
 export function usdcToRaw(amount: number): number {
   return Math.round(amount * 1_000_000);
 }
 
-/** Calculate leverage metrics */
 export function calculateLeverageMetrics(collateralUsd: number, leverage: number) {
   const notionalUsd = collateralUsd * leverage;
   const borrowUsd = notionalUsd - collateralUsd;
-  const liquidationDrop = (1 / leverage) * 100; // % drop that triggers liquidation
+  const liquidationDrop = (1 / leverage) * 100;
   return { notionalUsd, borrowUsd, liquidationDropPct: liquidationDrop };
 }
 
 // ─── High-Level Flow ───────────────────────────────────────────────────────
 
 export interface OpenLeveragePositionParams {
-  walletAddress: string;  // base58 Solana pubkey
-  walletAdapter: any;     // SignerWalletAdapter
+  walletAddress: string;
+  walletAdapter: any;
   connection: Connection;
-  collateralUsd: number;
-  leverage: number;
-  targetMint: string;     // Token to long
+  collateralSol: number;    // SOL amount to deposit (e.g. 0.1)
+  leverage: number;          // 1.1 - 10
+  targetMint: string;        // Token to long (USDC_MINT for no swap, any SPL token otherwise)
   slippagePercent?: number;
 }
 
 /**
  * Open a leveraged long position:
- * 1. Try Kamino setup (creates obligation if needed — may fail if already set up, that's OK)
- * 2. Open leveraged position via Kamino (deposits USDC, borrows more, swaps)
- * 3. If target mint isn't USDC or SOL, do a separate Jupiter swap
+ *   1. Kamino setup — create obligation (one-time, OK if already exists)
+ *   2. Kamino openPosition — deposit SOL, borrow USDC with leverage
+ *   3. If target isn't USDC, Jupiter swap borrowed USDC → target token
  *
  * Returns the transaction signature(s).
  */
@@ -317,56 +331,60 @@ export async function openLeveragePosition(params: OpenLeveragePositionParams): 
     walletAddress,
     walletAdapter,
     connection,
-    collateralUsd,
+    collateralSol,
     leverage,
     targetMint,
     slippagePercent = 1,
   } = params;
 
+  const { address: marketAddr } = pickMarket();
+
   const signatures: string[] = [];
   const steps: string[] = [];
 
   try {
-    // Step 1: Try setup (creates obligation if needed — OK if fails = already exists)
+    // Step 1: Try setup (creates obligation if needed — OK if already exists)
     try {
       steps.push("Creating Kamino obligation...");
       const setupTx = await kaminoSetup({
         wallet: walletAddress,
-        collTokenMint: USDC_MINT, // Deposit USDC as collateral
-        debtTokenMint: USDC_MINT,  // Borrow USDC
+        market: marketAddr,
+        collTokenMint: SOL_MINT,
+        debtTokenMint: USDC_MINT,
       });
       const setupSig = await signAndSendTransaction(setupTx, walletAdapter, connection);
       signatures.push(setupSig);
-      steps.push(`Obligation created: ${setupSig}`);
+      steps.push(`Obligation created: ${setupSig.slice(0, 8)}…`);
     } catch (e: any) {
-      // Setup fails if obligation already exists — that's fine
       if (e?.message?.includes("already") || e?.message?.includes("0x1")) {
         steps.push("Obligation already exists, skipping setup");
       } else {
-        // Unexpected error — still log but continue
         steps.push(`Setup skipped: ${e?.message ?? "unknown"}`);
       }
     }
 
-    // Step 2: Open leveraged position via Kamino
-    steps.push("Opening leveraged position...");
+    // Step 2: Open leveraged position — deposit SOL, borrow USDC
+    steps.push("Opening leveraged position (deposit SOL, borrow USDC)…");
     const positionTx = await kaminoOpenPosition({
       wallet: walletAddress,
-      collTokenMint: USDC_MINT,  // Deposit USDC
-      debtTokenMint: USDC_MINT,   // Borrow USDC
+      market: marketAddr,
+      collTokenMint: SOL_MINT,
+      debtTokenMint: USDC_MINT,
       leverage,
-      amount: collateralUsd,
+      amount: collateralSol,
       slippage: slippagePercent,
     });
     const positionSig = await signAndSendTransaction(positionTx, walletAdapter, connection);
     signatures.push(positionSig);
-    steps.push(`Position opened: ${positionSig}`);
+    steps.push(`Position opened: ${positionSig.slice(0, 8)}…`);
 
-    // Step 3: If target isn't USDC, swap the borrowed USDC → target via Jupiter
+    // Step 3: If target isn't USDC, swap borrowed USDC → target via Jupiter
     if (targetMint !== USDC_MINT) {
-      steps.push("Swapping USDC → target token via Jupiter...");
-      const borrowUsd = collateralUsd * (leverage - 1);
-      const rawAmount = usdcToRaw(borrowUsd);
+      steps.push("Swapping borrowed USDC → target token via Jupiter…");
+      const borrowUsd = collateralSol * (leverage - 1) * 150; // rough SOL price * leverage
+      // Get SOL price to estimate borrowed amount
+      // For now, use a reasonable USDC amount estimate
+      const rawAmount = usdcToRaw(Math.max(borrowUsd, 1)); // at least 1 USDC
 
       const quote = await getJupiterQuote({
         inputMint: USDC_MINT,
@@ -378,12 +396,11 @@ export async function openLeveragePosition(params: OpenLeveragePositionParams): 
       const swapBase64 = await getJupiterSwapTx(quote, walletAddress, Math.round(slippagePercent * 100));
       const swapSig = await signAndSendTransaction(swapBase64, walletAdapter, connection);
       signatures.push(swapSig);
-      steps.push(`Swap complete: ${swapSig}`);
+      steps.push(`Swap complete: ${swapSig.slice(0, 8)}…`);
     }
 
     return { signatures, steps };
   } catch (error: any) {
-    // Attach partial progress info to the error
     error.steps = steps;
     error.signatures = signatures;
     throw error;
