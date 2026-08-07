@@ -1,16 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 
 const STORAGE_KEY = "lever-info-dismissed";
 
 export default function InfoStrip() {
-  const [dismissed, setDismissed] = useState(true); // start true to avoid flash
+  // null = not yet hydrated (show), true = dismissed (hide), false = not dismissed (show)
+  const [dismissed, setDismissed] = useState<boolean | null>(null);
 
   useEffect(() => {
     const val = localStorage.getItem(STORAGE_KEY);
     setDismissed(val === "1");
   }, []);
+
+  // Don't render until hydration finishes to avoid mismatch
+  if (dismissed === null) return null;
 
   if (dismissed) return null;
 
