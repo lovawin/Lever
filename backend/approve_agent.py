@@ -1,27 +1,19 @@
 """
-Approve a Hyperliquid API wallet (agent wallet) on behalf of the master account.
-
-This allows the agent wallet to sign trades on HL without exposing the master key.
+Approve a specific Hyperliquid API wallet (agent) on behalf of the master account.
 
 Usage:
   python approve_agent.py
-
-Requires .env with:
-  HL_PRIVATE_KEY — master account private key
-  HL_AGENT_ADDRESS — agent wallet address to approve
-  HL_API_URL — https://api.hyperliquid.xyz (or testnet)
 """
 
 import os
 import sys
 import time
 import json
-import struct
-from eth_account import Account
-from eth_account.messages import encode_structured_data
 import requests
+from eth_account import Account
+from hyperliquid.utils.signing import sign_agent, get_timestamp_ms
 
-# Load .env manually
+# Load .env
 def load_env():
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     if not os.path.exists(env_path):
@@ -36,117 +28,79 @@ def load_env():
 
 load_env()
 
-HL_API_URL = os.getenv("HL_API_URL", "https://api.hyperliquid.xyz")
 MASTER_KEY = os.getenv("HL_PRIVATE_KEY", "")
 AGENT_ADDRESS = os.getenv("HL_AGENT_ADDRESS", "")
+HL_API_URL = os.getenv("HL_API_URL", "https://api.hyperliquid.xyz")
 
 if not MASTER_KEY or not AGENT_ADDRESS:
     print("ERROR: Set HL_PRIVATE_KEY and HL_AGENT_ADDRESS in .env")
     sys.exit(1)
 
 if not MASTER_KEY.startswith("0x"):
-    MASTER_KEY = "0x" + MASTER_KEY
+    MASTER_KEY = "***" + MASTER_KEY
 
 master_account = Account.from_key(MASTER_KEY)
+is_mainnet = "hyperliquid.xyz" in HL_API_URL and "testnet" not in HL_API_URL
+
 print(f"Master account: {master_account.address}")
 print(f"Agent to approve: {AGENT_ADDRESS}")
+print(f"API URL: {HL_API_URL} ({'mainnet' if is_mainnet else 'testnet'})")
 
+nonce = get_timestamp_ms()
 
-# ─── Msgpack-ish encoder (minimal, for HL actions) ──────────────────────────
+action = {
+    "type": "approveAgent",
+    "agentAddress": AGENT_ADDRESS,
+    "agentName": "LeverBot",
+    "nonce": nonce,
+}
 
-def encode_action(action: dict) -> bytes:
-    """Encode an HL action to msgpack-like format using msgpack library."""
-    try:
-        import msgpack
-        return msgpack.packb(action)
-    except ImportError:
-        print("ERROR: msgpack not installed. Run: pip install msgpack")
-        sys.exit(1)
+signature = sign_agent(master_account, action, is_mainnet)
 
+payload = {
+    "action": action,
+    "nonce": nonce,
+    "signature": signature,
+}
 
-def sign_action(action: dict, nonce: int, private_key: str) -> dict:
-    """Sign an HL L1 action with EIP-712."""
-    if not private_key.startswith("0x"):
-        private_key = "0x" + private_key
+print(f"\nApproving agent {AGENT_ADDRESS}...")
+print(f"Nonce: {nonce}")
 
-    action_bytes = encode_action(action)
+response = requests.post(
+    f"{HL_API_URL}/exchange",
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=15,
+)
 
-    # EIP-712 structured data for Hyperliquid
-    # Domain: { name: "Exchange", version: "1", chainId: 1337 }
-    structured_data = {
-        "types": {
-            "EIP712Domain": [
-                {"name": "name", "type": "string"},
-                {"name": "version", "type": "string"},
-                {"name": "chainId", "type": "uint256"},
-            ],
-            "Action": [
-                {"name": "action", "type": "bytes"},
-                {"name": "nonce", "type": "uint256"},
-            ],
-        },
-        "primaryType": "Action",
-        "domain": {
-            "name": "Exchange",
-            "version": "1",
-            "chainId": 1337,
-        },
-        "message": {
-            "action": action_bytes.hex(),
-            "nonce": nonce,
-        },
-    }
+print(f"\nResponse status: {response.status_code}")
+result = response.json()
+print(json.dumps(result, indent=2))
 
-    account = Account.from_key(private_key)
-    signed = account.sign_message(encode_structured_data(structured_data))
-
-    return {
-        "action": action,
-        "nonce": nonce,
-        "signature": {
-            "r": hex(signed.r),
-            "s": hex(signed.s),
-            "v": signed.v,
-        },
-    }
-
-
-def approve_agent():
-    """Approve an API/agent wallet on Hyperliquid."""
-    nonce = int(time.time() * 1000)
-
-    action = {
-        "type": "approveAgent",
-        "agentAddress": AGENT_ADDRESS,
-        "agentName": "LeverBot",
-    }
-
-    payload = sign_action(action, nonce, MASTER_KEY)
-
-    print(f"\nApproving agent {AGENT_ADDRESS} on {HL_API_URL}...")
-    print(f"Nonce: {nonce}")
-
-    response = requests.post(
-        f"{HL_API_URL}/exchange",
-        json=payload,
-        headers={"Content-Type": "application/json"},
-    )
-
-    print(f"\nResponse status: {response.status_code}")
-    result = response.json()
-    print(json.dumps(result, indent=2))
-
-    if response.status_code == 200 and result.get("status") == "ok":
-        print("\nSUCCESS: Agent wallet approved!")
-        print(f"Master: {master_account.address}")
-        print(f"Agent:  {AGENT_ADDRESS}")
+if response.status_code == 200:
+    status = result.get("status", "")
+    if status == "ok":
+        print("\n✅ SUCCESS: Agent wallet approved!")
+        print(f"  Master: {master_account.address}")
+        print(f"  Agent:  {AGENT_ADDRESS}")
     else:
-        print("\nFAILED. Check the error above.")
-        print("Common issues:")
-        print("  - Master account has no USDC on HL")
-        print("  - Need to use VPN (geo-blocked)")
-        print("  - Wrong network (use testnet first)")
+        print(f"\n⚠️  Status: {status}")
+        if "insufficient" in str(result).lower():
+            print("Master account needs USDC on HL first. Deposit via app.hyperliquid.xyz (use VPN).")
+else:
+    print(f"\n❌ HTTP error: {response.status_code}")
 
-
-if __name__ == "__main__":
-    approve_agent()
+# Verify
+print("\n--- Verifying account ---")
+try:
+    r = requests.post(f"{HL_API_URL}/info", json={
+        "type": "clearinghouseState",
+        "user": master_account.address,
+    }, timeout=10)
+    if r.status_code == 200:
+        state = r.json()
+        margin = state.get("marginSummary", {})
+        total = float(margin.get("totalMarginValue", "0"))
+        print(f"  Total margin on HL: ${total:,.2f}")
+except Exception as e:
+    print(f"  Could not verify: {e}")
