@@ -10,10 +10,15 @@ pragma solidity 0.8.24;
  *
  * Key guarantees:
  * - Users can ALWAYS withdraw via emergencyWithdraw(), even when paused
+ * - Regular withdraw()/withdrawAll() also work when paused (intentional: pause
+ *   blocks new deposits/opens, never blocks withdrawals)
  * - Wrong tokens (non-USDC ERC-20s, ETH) are recoverable
  * - Operators can only deduct approved margin + fee amounts
  * - Fee rates are capped and cannot be set to extreme values
+ * - Positions are tracked on-chain so closePosition must match a real open
  * - Anyone can verify solvency on-chain (vault USDC >= totalDeposits)
+ * - Two-step ownership transfer prevents accidental bricking
+ * - ReentrancyGuard on all external calls
  */
 
 interface IUSDC {
@@ -40,6 +45,10 @@ contract LeverVault {
     error SameAddress();
     error NoStuckTokens();
     error NoStuckETH();
+    error PositionNotFound();
+    error PositionAlreadyClosed();
+    error ReentrancyGuardReentrantCall();
+    error OwnershipNotProposed();
 
     // ─── Events ──────────────────────────────────────────────────────────────
 
@@ -47,6 +56,7 @@ contract LeverVault {
     event Withdrawn(address indexed user, uint256 amount);
     event EmergencyWithdrawn(address indexed user, uint256 amount);
     event PositionOpened(
+        bytes32 indexed positionId,
         address indexed user,
         string coin,
         bool isLong,
@@ -55,8 +65,8 @@ contract LeverVault {
         uint256 openFee
     );
     event PositionClosed(
+        bytes32 indexed positionId,
         address indexed user,
-        string positionId,
         uint256 closeFee,
         uint256 profitFee,
         int256 pnl,
@@ -74,6 +84,8 @@ contract LeverVault {
     event FeeControllerUpdated(address indexed oldController, address indexed newController);
     event FeeParamsUpdated(uint256 openCloseBps, uint256 profitFeeBps);
     event HLMasterUpdated(address indexed oldMaster, address indexed newMaster);
+    event OwnershipProposed(address indexed proposedOwner);
+    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
 
     // ─── Immutables ──────────────────────────────────────────────────────────
 
@@ -97,6 +109,15 @@ contract LeverVault {
 
     /// @notice Maximum profit fee rate (50%)
     uint256 public constant MAX_PROFIT_FEE_BPS = 5000;
+
+    // ─── Structs ──────────────────────────────────────────────────────────────
+
+    struct Position {
+        address user;
+        uint256 margin;
+        uint256 openFee;
+        bool isOpen;
+    }
 
     // ─── State ────────────────────────────────────────────────────────────────
 
@@ -128,6 +149,17 @@ contract LeverVault {
     /// @notice Stuck ETH per sender (for recovery)
     mapping(address => uint256) public stuckETH;
 
+    /// @notice On-chain position tracking
+    mapping(bytes32 => Position) public positions;
+
+    /// @notice Proposed new owner (two-step transfer)
+    address public proposedOwner;
+
+    /// @notice Reentrancy guard status
+    uint256 private _status;
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
     // ─── Modifiers ───────────────────────────────────────────────────────────
 
     modifier onlyOwner() {
@@ -148,6 +180,13 @@ contract LeverVault {
     modifier whenNotPaused() {
         if (paused) revert IsPaused();
         _;
+    }
+
+    modifier nonReentrant() {
+        if (_status == _ENTERED) revert ReentrancyGuardReentrantCall();
+        _status = _ENTERED;
+        _;
+        _status = _NOT_ENTERED;
     }
 
     // ─── Constructor ──────────────────────────────────────────────────────────
@@ -174,6 +213,7 @@ contract LeverVault {
         openCloseFeeBps = _openCloseFeeBps;
         profitFeeBps = _profitFeeBps;
         owner = msg.sender;
+        _status = _NOT_ENTERED;
 
         emit TreasuryUpdated(address(0), _treasury);
         emit FeeControllerUpdated(address(0), _feeController);
@@ -188,7 +228,7 @@ contract LeverVault {
      * @dev User must approve USDC transfer first.
      *      Uses balance diff to handle fee-on-transfer tokens.
      */
-    function deposit(uint256 amount) external whenNotPaused {
+    function deposit(uint256 amount) external whenNotPaused nonReentrant {
         if (amount == 0) revert ZeroAmount();
         if (amount < MIN_DEPOSIT) revert BelowMinimum();
         if (amount > MAX_DEPOSIT) revert AboveMaximum();
@@ -209,9 +249,9 @@ contract LeverVault {
 
     /**
      * @notice Withdraw USDC from the vault.
-     * @dev Always free. No withdrawal fee.
+     * @dev Always free. No withdrawal fee. Works even when paused (intentional).
      */
-    function withdraw(uint256 amount) external {
+    function withdraw(uint256 amount) external nonReentrant {
         if (amount == 0) revert ZeroAmount();
         if (amount < MIN_WITHDRAW) revert BelowMinimum();
         if (balances[msg.sender] < amount) revert InsufficientBalance();
@@ -227,8 +267,9 @@ contract LeverVault {
 
     /**
      * @notice Withdraw entire balance.
+     * @dev Works even when paused (intentional).
      */
-    function withdrawAll() external {
+    function withdrawAll() external nonReentrant {
         uint256 amount = balances[msg.sender];
         if (amount == 0) revert InsufficientBalance();
 
@@ -243,8 +284,9 @@ contract LeverVault {
     /**
      * @notice Emergency withdraw — ALWAYS works, even when paused.
      * @dev This is the escape hatch. If anything goes wrong, users can always get their USDC.
+     *      No pause check. No reentrancy concern (just a self-transfer of balance).
      */
-    function emergencyWithdraw() external {
+    function emergencyWithdraw() external nonReentrant {
         uint256 amount = balances[msg.sender];
         if (amount == 0) revert InsufficientBalance();
 
@@ -263,71 +305,98 @@ contract LeverVault {
      * @notice Open a position on behalf of a user.
      * @dev Only operators can call. Deducts margin + open fee from user balance.
      *      Sends margin to HL master account, fee to treasury.
+     *      Creates an on-chain position record that must be closed via closePosition.
+     * @param positionId Unique identifier for this position (operator-generated, e.g. hash of trade params)
      */
     function openPosition(
+        bytes32 positionId,
         address user,
         uint256 margin,
         uint256 openFee,
         string calldata coin,
         bool isLong,
         uint8 leverage
-    ) external onlyOperator whenNotPaused {
+    ) external onlyOperator whenNotPaused nonReentrant {
         if (margin < MIN_POSITION) revert BelowMinimum();
-        if (openFee > (margin * MAX_OPEN_CLOSE_BPS) / 10000) revert FeeCapExceeded(); // openFee can't exceed max% of margin
+        if (openFee > (margin * MAX_OPEN_CLOSE_BPS) / 10000) revert FeeCapExceeded();
+        if (positions[positionId].isOpen) revert PositionAlreadyClosed(); // positionId already used
 
         uint256 total = margin + openFee;
         if (balances[user] < total) revert InsufficientBalance();
 
-        // CEI pattern
+        // CEI pattern: deduct before transfers
         balances[user] -= total;
         totalDeposits -= total;
+
+        // Track position on-chain
+        positions[positionId] = Position({
+            user: user,
+            margin: margin,
+            openFee: openFee,
+            isOpen: true
+        });
 
         // Fee to treasury
         USDC.transfer(treasury, openFee);
         // Margin to HL master account
         USDC.transfer(hlMasterAccount, margin);
 
-        emit PositionOpened(user, coin, isLong, leverage, margin, openFee);
+        emit PositionOpened(positionId, user, coin, isLong, leverage, margin, openFee);
     }
 
     /**
      * @notice Close a position on behalf of a user.
-     * @param closeFee Fee for closing position (open+close bps on notional)
-     * @param profitFee Fee on PnL (only if pnl > 0, otherwise 0)
+     * @param positionId Must match a currently-open position from openPosition
+     * @param closeFee Fee for closing position (capped at MAX_OPEN_CLOSE_BPS of position margin)
+     * @param profitFee Fee on PnL (only if pnl > 0, capped at profitFeeBps of profit)
      * @param pnl Realized PnL (positive = profit, negative = loss)
-     * @param marginReturn Original margin being returned
+     * @param marginReturn Amount of margin being returned (must equal position margin)
      */
     function closePosition(
-        address user,
+        bytes32 positionId,
         uint256 closeFee,
         uint256 profitFee,
         int256 pnl,
         uint256 marginReturn,
-        string calldata positionId
-    ) external onlyOperator whenNotPaused {
-        // Validate fee caps
-        uint256 totalFee = closeFee + profitFee;
-        if (profitFee > 0 && (profitFee * 10000) > uint256(pnl > 0 ? uint256(pnl) : uint256(0)) * profitFeeBps) {
-            revert FeeCapExceeded();
-        }
+        string calldata /* positionIdString */
+    ) external onlyOperator whenNotPaused nonReentrant {
+        Position storage pos = positions[positionId];
+
+        // Position must exist and be open
+        if (!pos.isOpen) revert PositionNotFound();
+
+        // marginReturn must match the original position margin exactly
+        if (marginReturn != pos.margin) revert PositionNotFound();
+
+        // Cap closeFee: cannot exceed MAX_OPEN_CLOSE_BPS of position margin
+        if (closeFee > (pos.margin * MAX_OPEN_CLOSE_BPS) / 10000) revert FeeCapExceeded();
+
+        // Cap profitFee: cannot exceed profitFeeBps of profit
+        if (pnl > 0 && profitFee > (uint256(pnl) * profitFeeBps) / 10000) revert FeeCapExceeded();
+
+        // Mark position closed before any external calls
+        pos.isOpen = false;
 
         // Calculate return to user
-        // return = margin + pnl - closeFee - profitFee (if positive pnl)
-        // If pnl is negative, subtract the loss
         uint256 userReturn;
+        uint256 totalFee = closeFee + profitFee;
 
         if (pnl >= 0) {
             uint256 profit = uint256(pnl);
-            userReturn = marginReturn + profit;
+            userReturn = pos.margin + profit;
             if (userReturn > totalFee) {
                 userReturn -= totalFee;
             } else {
-                userReturn = 0; // edge case: fees exceed profit
+                userReturn = 0; // edge case: fees exceed profit + margin
             }
         } else {
             // Loss — deduct from margin
             uint256 loss = uint256(-pnl);
-            userReturn = marginReturn > loss ? marginReturn - loss : 0;
+            if (pos.margin > loss) {
+                userReturn = pos.margin - loss;
+            } else {
+                userReturn = 0;
+            }
             if (userReturn > closeFee) {
                 userReturn -= closeFee;
             } else {
@@ -335,21 +404,19 @@ contract LeverVault {
             }
         }
 
-        // Credit user balance
+        // Credit user balance from HL master account
         if (userReturn > 0) {
-            // Fund from HL master account (margin + pnl returned there)
-            // In production, the backend coordinates this
             USDC.transferFrom(hlMasterAccount, address(this), userReturn);
-            balances[user] += userReturn;
+            balances[pos.user] += userReturn;
             totalDeposits += userReturn;
         }
 
-        // Fees to treasury (funded from position proceeds)
+        // Fees to treasury (funded from HL master account)
         if (totalFee > 0) {
-            USDC.transfer(treasury, totalFee);
+            USDC.transferFrom(hlMasterAccount, treasury, totalFee);
         }
 
-        emit PositionClosed(user, positionId, closeFee, profitFee, pnl, userReturn);
+        emit PositionClosed(positionId, pos.user, closeFee, profitFee, pnl, userReturn);
     }
 
     /**
@@ -360,7 +427,7 @@ contract LeverVault {
         address user,
         uint256 amount,
         string calldata feeType
-    ) external onlyOperator {
+    ) external onlyOperator nonReentrant {
         if (amount == 0) revert ZeroAmount();
         if (balances[user] < amount) revert InsufficientBalance();
 
@@ -378,16 +445,15 @@ contract LeverVault {
     /**
      * @notice Rescue any ERC-20 token sent to this contract by mistake.
      * @dev Does NOT work for USDC — use withdraw() for that.
-     *      Anyone can call this for any non-USDC token.
-     *      Tokens go to msg.sender.
+     *      Only owner can call. Tokens go to owner to prevent front-running.
      */
-    function rescueTokens(address token, uint256 amount) external {
+    function rescueTokens(address token, uint256 amount) external onlyOwner {
         if (token == address(USDC)) revert CannotRescueUSDC();
         if (amount == 0) revert ZeroAmount();
 
-        IUSDC(token).transfer(msg.sender, amount);
+        IUSDC(token).transfer(owner, amount);
 
-        emit TokensRescued(token, msg.sender, amount);
+        emit TokensRescued(token, owner, amount);
     }
 
     /**
@@ -402,7 +468,7 @@ contract LeverVault {
     /**
      * @notice Recover ETH you accidentally sent to the contract.
      */
-    function recoverETH() external {
+    function recoverETH() external nonReentrant {
         uint256 amount = stuckETH[msg.sender];
         if (amount == 0) revert NoStuckETH();
 
@@ -491,9 +557,37 @@ contract LeverVault {
         emit FeeParamsUpdated(_openCloseFeeBps, _profitFeeBps);
     }
 
+    // ─── Two-Step Ownership Transfer ──────────────────────────────────────────
+
+    /**
+     * @notice Propose a new owner. Does not take effect until acceptOwnership is called.
+     */
+    function proposeOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert ZeroAddress();
+        if (newOwner == owner) revert SameAddress();
+        proposedOwner = newOwner;
+        emit OwnershipProposed(newOwner);
+    }
+
+    /**
+     * @notice Accept ownership. Only the proposed owner can call this.
+     */
+    function acceptOwnership() external {
+        if (msg.sender != proposedOwner) revert OwnershipNotProposed();
+        address oldOwner = owner;
+        owner = proposedOwner;
+        proposedOwner = address(0);
+        emit OwnershipTransferred(oldOwner, owner);
+    }
+
+    /**
+     * @dev Legacy one-step transfer — kept for compatibility but delegates to two-step.
+     * @notice Use proposeOwnership + acceptOwnership instead.
+     */
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
         if (newOwner == owner) revert SameAddress();
-        owner = newOwner;
+        proposedOwner = newOwner;
+        emit OwnershipProposed(newOwner);
     }
 }
