@@ -8,24 +8,35 @@ export default function InfoStrip() {
   if (!visible) return null;
 
   return (
-    <div className="border-b border-white/5 bg-white/[0.02]">
-      <div className="mx-auto max-w-[1600px] px-4 py-2 flex items-start gap-3 text-[11px] text-muted">
-        <div className="flex-1 flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="flex items-center gap-1">
-            <span className="text-bull font-bold text-[10px]">⚡ PERPS</span>
-            EVM wallet · USDC on Arbitrum
-          </span>
-          <span className="text-white/10 hidden sm:inline">|</span>
-          <span className="flex items-center gap-1">
-            <span className="text-purple-400 font-bold text-[10px]">🌀 SPOT</span>
-            Solana wallet · SOL + SPL tokens
-          </span>
-          <span className="text-white/10 hidden sm:inline">|</span>
-          <span className="text-yellow-400/80">Withdrawals always free · Non-custodial</span>
+    <div className="glass rounded-2xl p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex-1">
+          <h3 className="text-sm font-bold mb-2">How Lever Works</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="bg-white/[0.03] border border-bull/20 rounded-xl p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-bull font-bold text-xs">⚡ Perps</span>
+                <span className="text-[10px] text-muted">EVM · Arbitrum</span>
+              </div>
+              <p className="text-[11px] text-muted leading-relaxed">
+                Long & short memecoins up to 20×. Requires <strong className="text-white">USDC on Arbitrum</strong> in your EVM wallet.
+              </p>
+            </div>
+            <div className="bg-white/[0.03] border border-purple-400/20 rounded-xl p-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-purple-400 font-bold text-xs">🌀 Spot</span>
+                <span className="text-[10px] text-muted">Solana · Kamino</span>
+              </div>
+              <p className="text-[11px] text-muted leading-relaxed">
+                Leverage on any Solana token. Requires <strong className="text-white">SOL + SPL tokens</strong> in your Solana wallet.
+              </p>
+            </div>
+          </div>
+          <p className="text-[10px] text-bull mt-2">Withdrawals always free · Non-custodial vault</p>
         </div>
         <button
           onClick={() => setVisible(false)}
-          className="text-muted hover:text-white transition-colors shrink-0 leading-none"
+          className="text-muted hover:text-white transition-colors shrink-0 text-sm leading-none"
           aria-label="Dismiss"
         >
           ✕

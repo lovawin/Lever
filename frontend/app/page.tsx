@@ -51,7 +51,6 @@ export default function Page() {
   return (
     <div className="min-h-screen hero-gradient flex flex-col">
       <MarketTicker mids={mids} />
-      <InfoStrip />
 
       {/* Header */}
       <header className="border-b border-white/5">
@@ -90,6 +89,7 @@ export default function Page() {
 
         {/* Center: Chart + Trade + Positions */}
         <div className="space-y-4">
+          <InfoStrip />
           <PriceChart coin={selectedCoin} />
           <TradePanel
             mids={mids}
