@@ -133,7 +133,10 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
           throw new Error("Select a token to long");
         }
 
-        const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+        const connection = new Connection(
+          process.env.NEXT_PUBLIC_SOL_RPC ?? "https://api.mainnet-beta.solana.com",
+          "confirmed"
+        );
 
         // Get a wallet adapter that supports signTransaction
         const walletAdapter = (window as any).solana;
