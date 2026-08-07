@@ -10,7 +10,7 @@ import FundingRate from "@/components/FundingRate";
 import MemeCoinSelector from "@/components/MemeCoinSelector";
 import NFTBenefits from "@/components/NFTBenefits";
 import PriceChart from "@/components/PriceChart";
-import WelcomeModal from "@/components/WelcomeModal";
+import InfoStrip from "@/components/InfoStrip";
 import { useEffect, useState } from "react";
 import { getAllMids, getMeta, type PerpMarket } from "@/lib/hyperliquid";
 
@@ -50,8 +50,8 @@ export default function Page() {
 
   return (
     <div className="min-h-screen hero-gradient flex flex-col">
-      <WelcomeModal />
       <MarketTicker mids={mids} />
+      <InfoStrip />
 
       {/* Header */}
       <header className="border-b border-white/5">
