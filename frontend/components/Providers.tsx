@@ -9,11 +9,12 @@ import {
   ConnectionProvider,
   WalletProvider,
 } from "@solana/wallet-adapter-react";
-import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets";
+import {
+  PhantomWalletAdapter,
+  SolflareWalletAdapter,
+} from "@solana/wallet-adapter-wallets";
 import { clusterApiUrl } from "@solana/web3.js";
 import "@rainbow-me/rainbowkit/styles.css";
-import "@solana/wallet-adapter-react-ui/styles.css";
 
 const WALLETCONNECT_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "lever-mvp-placeholder";
 
@@ -45,10 +46,8 @@ export function Providers({ children }: { children: ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider>
           <ConnectionProvider endpoint={SOL_ENDPOINT}>
-            <WalletProvider wallets={solanaWallets} autoConnect>
-              <WalletModalProvider>
-                {children}
-              </WalletModalProvider>
+            <WalletProvider wallets={solanaWallets} autoConnect localStorageKey="lever-sol-wallet">
+              {mounted ? children : <div className="min-h-screen" />}
             </WalletProvider>
           </ConnectionProvider>
         </RainbowKitProvider>
