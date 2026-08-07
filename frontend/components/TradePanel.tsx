@@ -106,7 +106,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
           sizeUsd,
           address,
           walletClient,
-          testnet: true,
+          testnet: false,
           leverage: levCapped,
         });
 
@@ -176,7 +176,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
         <h2 className="text-lg font-bold">Trade</h2>
         <div className="flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-bull pulse-dot" />
-          <span className="text-[10px] uppercase tracking-widest text-yellow-400">Testnet</span>
+          <span className="text-[10px] uppercase tracking-widest text-bull">Live</span>
         </div>
       </div>
 

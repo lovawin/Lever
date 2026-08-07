@@ -28,7 +28,7 @@ export default function InfoStrip() {
                 <span className="text-[10px] text-muted">Solana · Kamino</span>
               </div>
               <p className="text-[11px] text-muted leading-relaxed">
-                Leverage on any Solana token. Requires <strong className="text-white">SOL + SPL tokens</strong> in your Solana wallet.
+                Leverage on any Solana token. Requires <strong className="text-white">SOL for gas</strong> in your Solana wallet. No USDC needed — Kamino lends &amp; Jupiter swaps for you.
               </p>
             </div>
           </div>

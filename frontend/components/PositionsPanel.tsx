@@ -53,8 +53,8 @@ export default function PositionsPanel() {
       setLoading(true);
       try {
         const [s, f] = await Promise.all([
-          getClearinghouseState(address!, true),
-          getUserFills(address!, true, 20),
+          getClearinghouseState(address!, false),
+          getUserFills(address!, false, 20),
         ]);
         if (!alive) return;
         setState(s);
@@ -77,7 +77,7 @@ export default function PositionsPanel() {
         <div className="text-5xl mb-4">🔑</div>
         <h3 className="text-lg font-bold mb-2">Connect Your Wallet</h3>
         <p className="text-sm text-muted max-w-sm">
-          Connect an EVM wallet (MetaMask, Rabby) to see your testnet positions and trade history.
+          Connect an EVM wallet (MetaMask, Rabby) to see your positions and trade history.
         </p>
       </div>
     );
@@ -95,7 +95,7 @@ export default function PositionsPanel() {
         <h2 className="text-lg font-bold">Account</h2>
         <div className="flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-bull pulse-dot" />
-          <span className="text-[10px] uppercase tracking-widest text-yellow-400">Testnet</span>
+          <span className="text-[10px] uppercase tracking-widest text-bull">Live</span>
         </div>
       </div>
 
