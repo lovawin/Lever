@@ -42,7 +42,7 @@ html, body { background: var(--bg); color: #f5f5f5; }
   100% { transform: translateX(-50%); }
 }
 .ticker-track {
-  animation: ticker-scroll 30s linear infinite;
+  animation: ticker-scroll 45s linear infinite;
 }
 
 /* Pulse dot */
