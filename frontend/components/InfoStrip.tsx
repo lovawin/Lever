@@ -1,22 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-const STORAGE_KEY = "lever-info-dismissed";
+import { useState } from "react";
 
 export default function InfoStrip() {
-  // null = not yet hydrated (show), true = dismissed (hide), false = not dismissed (show)
-  const [dismissed, setDismissed] = useState<boolean | null>(null);
+  const [visible, setVisible] = useState(true);
 
-  useEffect(() => {
-    const val = localStorage.getItem(STORAGE_KEY);
-    setDismissed(val === "1");
-  }, []);
-
-  // Don't render until hydration finishes to avoid mismatch
-  if (dismissed === null) return null;
-
-  if (dismissed) return null;
+  if (!visible) return null;
 
   return (
     <div className="border-b border-white/5 bg-white/[0.02]">
@@ -35,11 +24,9 @@ export default function InfoStrip() {
           <span className="text-yellow-400/80">Withdrawals always free · Non-custodial</span>
         </div>
         <button
-          onClick={() => {
-            localStorage.setItem(STORAGE_KEY, "1");
-            setDismissed(true);
-          }}
+          onClick={() => setVisible(false)}
           className="text-muted hover:text-white transition-colors shrink-0 leading-none"
+          aria-label="Dismiss"
         >
           ✕
         </button>
