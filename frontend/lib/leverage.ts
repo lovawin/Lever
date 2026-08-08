@@ -1,21 +1,17 @@
 /**
- * Leveraged spot longs on Solana — Kamino Multiply + Jupiter Swap integration.
+ * Leveraged spot longs on Solana — Lavarage + Kamino + Jupiter integration.
  *
- * Flow:
- *   1. User deposits SOL as collateral into a Kamino lending market
- *   2. Kamino borrows USDC against that collateral (leverage multiplier)
- *   3. If target token isn't USDC, Jupiter swaps the borrowed USDC → target token
- *   4. User ends up with: SOL collateral position on Kamino + target token in wallet
+ * Strategy:
+ *   1. Lavarage API (primary) — supports any token, returns pre-built tx for signing
+ *      Requires API key for position endpoints; offers are public.
+ *   2. Kamino Dialect (fallback) — SOL collateral + USDC debt pairs only
+ *      Setup + openPosition, then Jupiter swap USDC → target
+ *   3. Pure spot (no leverage) — Jupiter swap SOL → target token, 1x only
  *
- * Kamino only supports specific collateral/debt pairs per market.
- * For meme token longs: deposit SOL → borrow USDC → swap to meme via Jupiter.
- *
- * CHANGES FROM PREVIOUS VERSION:
- *   - Fixed undefined KAMINO_REST_API constant
- *   - Implemented actual Jupiter USDC→token swap step (was TODO before)
- *   - Dynamic market selection based on token availability
- *   - Better error messages for common failures
- *   - Proper SOL price resolution for USD→SOL conversion
+ * The flow:
+ *   - Try Lavarage first (if API key available and pool exists)
+ *   - Fall back to Kamino for SOL/USDC pairs
+ *   - Fall back to pure Jupiter swap (1x, no leverage)
  */
 
 import {
@@ -31,15 +27,19 @@ export const SOL_MINT = "So11111111111111111111111111111111111111112";
 const SOL_DECIMALS = 9;
 const USDC_DECIMALS = 6;
 
+// Lavarage API — spot leverage for any token
+const LAVARAGE_API = "https://api.lavarage.xyz";
+const LAVARAGE_API_KEY = process.env.NEXT_PUBLIC_LAVARAGE_API_KEY || "";
+
 // Kamino Dialect (Blinks) API — CORS-enabled, returns signed transactions
 const KAMINO_DIALECT_API = "https://kamino.dial.to/api";
 // Kamino REST API — market metadata
 const KAMINO_REST_API = "https://api.kamino.finance";
+
 // Jupiter Quote + Swap API
 const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6";
 
 // Known Kamino markets — SOL collateral + USDC debt pairs
-// Updated from live API 2026-08-08
 const KAMINO_MARKETS: Record<string, { address: string; name: string }> = {
   main:       { address: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF", name: "SOL/BTC Market" },
   altcoins:   { address: "ByYiZxp8QrdN9qbdtaAiePN8AAr3qvTPppNJDpf5DVJ5", name: "Altcoins Market" },
@@ -47,10 +47,6 @@ const KAMINO_MARKETS: Record<string, { address: string; name: string }> = {
   bitcoin:    { address: "GMqmFygF5iSm5nkckYU6tieggFcR42SyjkkhK5rswFRs", name: "Bitcoin Market" },
   fartcoin:   { address: "4UwtBqa8DDtcWV6nWFregeMVkGdfWfiYeFxoHaR2hm9c", name: "Fartcoin Market" },
   bonk:       { address: "7WQeTuLsFrZsgnHW7ddFdNfhfJAViqH4mvcFZPQ5zuQ9", name: "Bonk Market" },
-  jupiter:    { address: "3EZEy7vBTJ8Q9PWxKwdLVULRdsvVLT51rpBG3gH1TSJ5", name: "Jupiter Market" },
-  jto:        { address: "9wmqLq3n3KdQBbNfwqrF3PwcLgZ9edZ7hW5TsaC3o6uj", name: "JTO Market" },
-  jlp:        { address: "DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek", name: "JLP Market" },
-  hype:       { address: "FteaGMVCLDF4eonrTiQkRQ5kby5ohwCfaMD2mNiPkZL7", name: "HYPE Market" },
 };
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -65,9 +61,24 @@ export interface TokenSearchResult {
   liquidity?: number;
 }
 
+export type LeverageProvider = "lavarage" | "kamino" | "spot";
+
+export interface LavarageOffer {
+  publicKey: string;
+  baseTokenAddress: string;
+  quoteTokenAddress: string;
+  baseToken: { symbol: string; name: string; address: string; decimals: number; price: string };
+  quoteToken: { symbol: string; name: string; address: string; decimals: number; price: string };
+  maxLeverage: string;
+  availableForOpen: string;
+  side: string;
+  apr: string;
+}
+
 export interface LeverageResult {
   signatures: string[];
   steps: string[];
+  provider: LeverageProvider;
 }
 
 // ─── Token Search (DexScreener — CORS-enabled) ─────────────────────────────
@@ -109,32 +120,14 @@ export async function searchTokens(query: string): Promise<TokenSearchResult[]> 
   return results.slice(0, 20);
 }
 
-// ─── Market Selection ──────────────────────────────────────────────────────
-
-/**
- * Pick the best Kamino market for a leverage position.
- * We always deposit SOL and borrow USDC, then swap to target.
- * The main SOL/BTC market is the most liquid and works for all tokens.
- */
-function pickMarket(targetMint?: string): { address: string; name: string } {
-  // All markets support SOL collateral + USDC debt, so we use the most liquid one.
-  // In the future, we could route to specific markets (e.g., PUMP market for PUMP token).
-  return KAMINO_MARKETS.main;
-}
-
 // ─── SOL Price Helper ──────────────────────────────────────────────────────
 
-/**
- * Get current SOL price from DexScreener.
- * Falls back to a hardcoded estimate if the API fails.
- */
 export async function getSolPrice(): Promise<number> {
   try {
     const r = await fetch("https://api.dexscreener.com/latest/dex/search?q=SOL");
     if (r.ok) {
       const data = await r.json();
       const pairs = data.pairs ?? [];
-      // Find the SOL/USDC pair on a major DEX
       for (const p of pairs) {
         if (
           p.chainId === "solana" &&
@@ -145,21 +138,146 @@ export async function getSolPrice(): Promise<number> {
           return parseFloat(p.priceUsd);
         }
       }
-      // Fallback: any SOL pair with a price
       for (const p of pairs) {
         if (p.baseToken?.symbol === "SOL" && parseFloat(p.priceUsd ?? "0") > 0) {
           return parseFloat(p.priceUsd);
         }
       }
     }
-  } catch {
-    // ignore
-  }
-  // Hardcoded fallback — will be slightly stale
-  return 175;
+  } catch { /* ignore */ }
+  return 175; // hardcoded fallback
 }
 
-// ─── Kamino Leverage API (Dialect/Blinks — CORS-enabled) ──────────────────
+// ─── Lavarage API ──────────────────────────────────────────────────────────
+
+/**
+ * Search Lavarage offers for a token.
+ * Public endpoint — no API key required.
+ */
+export async function searchLavarageOffers(
+  baseTokenMint: string,
+  side: "LONG" | "SHORT" = "LONG"
+): Promise<LavarageOffer[]> {
+  const url = new URL(`${LAVARAGE_API}/api/v1/offers/match`);
+  url.searchParams.set("baseTokenMint", baseTokenMint);
+  url.searchParams.set("side", side);
+
+  const headers: Record<string, string> = {};
+  if (LAVARAGE_API_KEY) headers["x-api-key"] = LAVARAGE_API_KEY;
+
+  const r = await fetch(url.toString(), { headers });
+  if (!r.ok) {
+    // No matching offers — token not supported on Lavarage
+    return [];
+  }
+
+  const data = await r.json();
+  // match endpoint returns { best, alternatives }
+  const offers: LavarageOffer[] = [];
+  if (data.best) offers.push(data.best);
+  if (data.alternatives?.length) offers.push(...data.alternatives);
+  return offers;
+}
+
+/**
+ * Get all Lavarage offers (for browsing).
+ * Public endpoint — no API key required.
+ */
+export async function getLavarageOffers(params?: {
+  search?: string;
+  side?: string;
+  limit?: number;
+}): Promise<LavarageOffer[]> {
+  const url = new URL(`${LAVARAGE_API}/api/v1/offers`);
+  if (params?.search) url.searchParams.set("search", params.search);
+  if (params?.side) url.searchParams.set("side", params.side);
+  if (params?.limit) url.searchParams.set("limit", String(params.limit));
+
+  const r = await fetch(url.toString());
+  if (!r.ok) return [];
+  return r.json();
+}
+
+/**
+ * Open a leveraged position via Lavarage.
+ * Requires API key. Returns base58-encoded VersionedTransaction.
+ */
+export async function lavarageOpenPosition(params: {
+  baseTokenMint: string;
+  quoteTokenMint?: string;  // defaults to SOL for LONG
+  userPublicKey: string;
+  collateralAmount: string;  // raw units (lamports for SOL, 1e6 for USDC)
+  leverage: number;
+  side: "LONG" | "SHORT";
+  slippageBps?: number;
+}): Promise<{ transaction: string; positionAddress: string; quote: any }> {
+  if (!LAVARAGE_API_KEY) {
+    throw new Error("Lavarage API key required — set NEXT_PUBLIC_LAVARAGE_API_KEY");
+  }
+
+  const r = await fetch(`${LAVARAGE_API}/api/v1/positions/open-by-token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": LAVARAGE_API_KEY,
+    },
+    body: JSON.stringify({
+      baseTokenMint: params.baseTokenMint,
+      quoteTokenMint: params.quoteTokenMint ?? SOL_MINT,
+      userPublicKey: params.userPublicKey,
+      collateralAmount: params.collateralAmount,
+      leverage: params.leverage,
+      side: params.side,
+      slippageBps: params.slippageBps ?? 100,
+    }),
+  });
+
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(`Lavarage open failed (${r.status}): ${err}`);
+  }
+
+  return r.json();
+}
+
+/**
+ * Quote a Lavarage position without building a transaction.
+ */
+export async function lavarageQuote(params: {
+  baseTokenMint: string;
+  quoteTokenMint?: string;
+  userPublicKey: string;
+  collateralAmount: string;
+  leverage: number;
+  side: "LONG" | "SHORT";
+  slippageBps?: number;
+}): Promise<any> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (LAVARAGE_API_KEY) headers["x-api-key"] = LAVARAGE_API_KEY;
+
+  const r = await fetch(`${LAVARAGE_API}/api/v1/positions/quote-by-token`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      baseTokenMint: params.baseTokenMint,
+      quoteTokenMint: params.quoteTokenMint ?? SOL_MINT,
+      userPublicKey: params.userPublicKey,
+      collateralAmount: params.collateralAmount,
+      leverage: params.leverage,
+      side: params.side,
+      slippageBps: params.slippageBps ?? 100,
+    }),
+  });
+
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(`Lavarage quote failed (${r.status}): ${err}`);
+  }
+
+  return r.json();
+}
+
+// ─── Kamino Leverage API (Dialect/Blinks) ──────────────────────────────────
 
 export interface KaminoSetupParams {
   wallet: string;
@@ -180,7 +298,6 @@ export interface KaminoLeverageParams {
 
 /**
  * Step 1: Create a Kamino obligation account.
- * Must be called once before opening a leveraged position.
  * Returns a base64-encoded VersionedTransaction for wallet signing.
  */
 export async function kaminoSetup(params: KaminoSetupParams): Promise<string> {
@@ -208,9 +325,8 @@ export async function kaminoSetup(params: KaminoSetupParams): Promise<string> {
 }
 
 /**
- * Step 2: Open a leveraged position.
+ * Step 2: Open a leveraged position on Kamino.
  * Returns a base64-encoded VersionedTransaction for wallet signing.
- * NOTE: User must have completed setup first.
  */
 export async function kaminoOpenPosition(params: KaminoLeverageParams): Promise<string> {
   const market = params.market ?? KAMINO_MARKETS.main.address;
@@ -248,7 +364,7 @@ export async function getKaminoMarkets(): Promise<Array<{ name: string; lendingM
   return r.json();
 }
 
-// ─── Jupiter Swap (direct — may need proxy for CORS) ─────────────────────
+// ─── Jupiter Swap ──────────────────────────────────────────────────────────
 
 export interface JupiterQuoteParams {
   inputMint: string;
@@ -328,13 +444,11 @@ export async function signAndSendTransaction(
 
   const signedTx = await walletAdapter.signTransaction(tx);
 
-  // Send with skipPreflight to avoid RPC rate-limit issues on preflight checks
   const signature = await connection.sendRawTransaction(signedTx.serialize(), {
     skipPreflight: true,
     maxRetries: 3,
   });
 
-  // Confirm with a timeout
   const latestBlockhash = await connection.getLatestBlockhash();
   await connection.confirmTransaction({
     signature,
@@ -343,6 +457,62 @@ export async function signAndSendTransaction(
   }, "confirmed");
 
   return signature;
+}
+
+/**
+ * Sign and send a base58-encoded transaction (Lavarage format).
+ */
+export async function signAndSendBase58Tx(
+  base58Tx: string,
+  walletAdapter: any,
+  connection: Connection,
+): Promise<string> {
+  // Decode base58 to bytes
+  const decoded = bs58Decode(base58Tx);
+  const tx = VersionedTransaction.deserialize(decoded);
+
+  if (!walletAdapter.signTransaction) {
+    throw new Error("Wallet does not support transaction signing. Use Phantom or Solflare.");
+  }
+
+  const signedTx = await walletAdapter.signTransaction(tx);
+
+  const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+    skipPreflight: true,
+    maxRetries: 3,
+  });
+
+  const latestBlockhash = await connection.getLatestBlockhash();
+  await connection.confirmTransaction({
+    signature,
+    blockhash: latestBlockhash.blockhash,
+    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+  }, "confirmed");
+
+  return signature;
+}
+
+// Simple base58 decoder (no dependency needed)
+function bs58Decode(str: string): Uint8Array {
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const bytes: number[] = [];
+  for (let i = 0; i < str.length; i++) {
+    let c = ALPHABET.indexOf(str[i]);
+    if (c < 0) throw new Error(`Invalid base58 character: ${str[i]}`);
+    for (let j = 0; j < bytes.length; j++) {
+      c += bytes[j] * 58;
+      bytes[j] = c & 0xff;
+      c >>= 8;
+    }
+    while (c > 0) {
+      bytes.push(c & 0xff);
+      c >>= 8;
+    }
+  }
+  for (let i = 0; i < str.length && str[i] === "1"; i++) {
+    bytes.push(0);
+  }
+  return new Uint8Array(bytes.reverse());
 }
 
 // ─── Utility ──────────────────────────────────────────────────────────────
@@ -366,22 +536,22 @@ export function calculateLeverageMetrics(collateralUsd: number, leverage: number
 
 export interface OpenLeveragePositionParams {
   walletAddress: string;
-  walletAdapter: any;       // Phantom/Solflare wallet adapter with signTransaction
+  walletAdapter: any;
   connection: Connection;
   collateralSol: number;    // SOL amount to deposit (e.g. 0.1)
-  leverage: number;          // 1.1 - 5 (capped for spot)
-  targetMint: string;        // Token to long (USDC_MINT for no swap, any SPL token otherwise)
+  leverage: number;          // 1.1 - 100 (Lavarage) or 1.1 - 5 (Kamino)
+  targetMint: string;        // Token to long (any SPL token mint)
   slippagePercent?: number;
-  solPrice?: number;         // Optional: pass SOL price to avoid extra API call
+  solPrice?: number;
 }
 
 /**
- * Open a leveraged long position:
- *   1. Kamino setup — create obligation (one-time, OK if already exists)
- *   2. Kamino openPosition — deposit SOL, borrow USDC with leverage
- *   3. If target isn't USDC, Jupiter swap borrowed USDC → target token
+ * Open a leveraged long position — tries Lavarage → Kamino → Spot swap.
  *
- * Returns the transaction signature(s).
+ * Strategy:
+ *   1. Lavarage (if API key + pool available) — any token, true leverage
+ *   2. Kamino + Jupiter swap — SOL collateral, USDC debt, swap to target
+ *   3. Pure Jupiter spot swap — 1x only, no leverage
  */
 export async function openLeveragePosition(params: OpenLeveragePositionParams): Promise<LeverageResult> {
   const {
@@ -394,94 +564,168 @@ export async function openLeveragePosition(params: OpenLeveragePositionParams): 
     slippagePercent = 1,
   } = params;
 
-  const market = pickMarket(targetMint);
-
   const signatures: string[] = [];
   const steps: string[] = [];
 
-  try {
-    // Step 1: Try setup (creates obligation if needed — OK if already exists)
+  // ── Strategy 1: Lavarage (best — any token, true leverage) ──────────
+  if (LAVARAGE_API_KEY) {
     try {
-      steps.push("Creating Kamino obligation…");
-      const setupTx = await kaminoSetup({
+      steps.push("Trying Lavarage leveraged position…");
+
+      // Convert SOL collateral to lamports for Lavarage
+      const collateralLamports = solToRaw(collateralSol);
+
+      // For SOL LONG with USDC quote, need to pass quoteTokenMint=USDC
+      const quoteMint = targetMint === SOL_MINT ? USDC_MINT : SOL_MINT;
+
+      const result = await lavarageOpenPosition({
+        baseTokenMint: targetMint,
+        quoteTokenMint: quoteMint,
+        userPublicKey: walletAddress,
+        collateralAmount: String(collateralLamports),
+        leverage,
+        side: "LONG",
+        slippageBps: Math.round(slippagePercent * 100),
+      });
+
+      // Lavarage returns base58-encoded transaction
+      const sig = await signAndSendBase58Tx(result.transaction, walletAdapter, connection);
+      signatures.push(sig);
+      steps.push(`✅ Lavarage position opened: ${sig.slice(0, 8)}…`);
+
+      return { signatures, steps, provider: "lavarage" };
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      if (msg.includes("NO_OFFER_FOR_TOKEN") || msg.includes("NO_MATCH")) {
+        steps.push("No Lavarage pool for this token, trying Kamino…");
+      } else if (msg.includes("API key")) {
+        steps.push("Lavarage API key not configured, trying Kamino…");
+      } else {
+        steps.push(`Lavarage failed: ${msg.slice(0, 100)}, trying Kamino…`);
+      }
+    }
+  } else {
+    steps.push("Lavarage not configured (no API key), trying Kamino…");
+  }
+
+  // ── Strategy 2: Kamino + Jupiter swap (SOL collateral + USDC debt) ──
+  // Only works for SOL collateral → borrow USDC → swap to target
+  if (targetMint !== SOL_MINT) {
+    // Target isn't SOL, so we can deposit SOL → borrow USDC → swap to target
+    try {
+      const market = KAMINO_MARKETS.main;
+
+      // Step 2a: Try Kamino setup
+      try {
+        steps.push("Creating Kamino obligation…");
+        const setupTx = await kaminoSetup({
+          wallet: walletAddress,
+          market: market.address,
+          collTokenMint: SOL_MINT,
+          debtTokenMint: USDC_MINT,
+        });
+        const setupSig = await signAndSendTransaction(setupTx, walletAdapter, connection);
+        signatures.push(setupSig);
+        steps.push(`✅ Obligation created: ${setupSig.slice(0, 8)}…`);
+      } catch (e: any) {
+        const msg = e?.message ?? "";
+        if (msg.includes("already") || msg.includes("0x1") || msg.includes("already exists")) {
+          steps.push("Obligation already exists, skipping setup");
+        } else if (msg.includes("403") || msg.includes("rate") || msg.includes("429") || msg.includes("Forbidden")) {
+          throw new Error(`RPC error during Kamino setup. Your Solana RPC may be rate-limited. Try using a private RPC (Helius, QuickNode) or retry later.\n\nDetails: ${msg}`);
+        } else {
+          // Setup might have failed but obligation could already exist — continue
+          steps.push(`Setup skipped: ${msg.slice(0, 100)}`);
+        }
+      }
+
+      // Step 2b: Open Kamino leveraged position (deposit SOL, borrow USDC)
+      steps.push("Opening Kamino position (deposit SOL, borrow USDC)…");
+      const positionTx = await kaminoOpenPosition({
         wallet: walletAddress,
         market: market.address,
         collTokenMint: SOL_MINT,
         debtTokenMint: USDC_MINT,
+        leverage,
+        amount: collateralSol,
+        slippage: slippagePercent,
       });
-      const setupSig = await signAndSendTransaction(setupTx, walletAdapter, connection);
-      signatures.push(setupSig);
-      steps.push(`✅ Obligation created: ${setupSig.slice(0, 8)}…`);
-    } catch (e: any) {
-      const msg = e?.message ?? "";
-      if (msg.includes("already") || msg.includes("0x1") || msg.includes("already exists")) {
-        // Obligation already exists — this is fine, continue
-        steps.push("Obligation already exists, skipping setup");
-      } else if (msg.includes("403") || msg.includes("rate") || msg.includes("429") || msg.includes("Forbidden")) {
-        throw new Error(`RPC error during setup — try again in a moment. ${msg}`);
-      } else {
-        // Other errors: log but continue (might be obligation already exists with different message)
-        steps.push(`Setup skipped: ${msg.slice(0, 100)}`);
-      }
-    }
+      const positionSig = await signAndSendTransaction(positionTx, walletAdapter, connection);
+      signatures.push(positionSig);
+      steps.push(`✅ Position opened: ${positionSig.slice(0, 8)}…`);
 
-    // Step 2: Open leveraged position — deposit SOL, borrow USDC
-    steps.push("Opening leveraged position (deposit SOL, borrow USDC)…");
-    const positionTx = await kaminoOpenPosition({
-      wallet: walletAddress,
-      market: market.address,
-      collTokenMint: SOL_MINT,
-      debtTokenMint: USDC_MINT,
-      leverage,
-      amount: collateralSol,
-      slippage: slippagePercent,
-    });
-    const positionSig = await signAndSendTransaction(positionTx, walletAdapter, connection);
-    signatures.push(positionSig);
-    steps.push(`✅ Position opened: ${positionSig.slice(0, 8)}…`);
-
-    // Step 3: If target isn't USDC, swap borrowed USDC → target token via Jupiter
-    if (targetMint !== USDC_MINT) {
+      // Step 2c: Swap borrowed USDC → target token via Jupiter
       steps.push("Swapping borrowed USDC → target token via Jupiter…");
-
-      // Calculate borrowed USDC amount: collateral * (leverage - 1)
-      // e.g., $50 collateral at 3x leverage → borrow $100 USDC
       const solPrice = params.solPrice ?? await getSolPrice();
       const collateralUsd = collateralSol * solPrice;
       const borrowUsd = collateralUsd * (leverage - 1);
       const borrowUsdcRaw = usdcToRaw(borrowUsd);
 
       if (borrowUsdcRaw < 1000) {
-        // Less than 0.001 USDC — skip swap
         steps.push("⚠ Borrowed amount too small to swap, skipping");
       } else {
         try {
-          // Get Jupiter quote for USDC → target token
           const quote = await getJupiterQuote({
             inputMint: USDC_MINT,
             outputMint: targetMint,
             amount: borrowUsdcRaw,
             slippageBps: Math.round(slippagePercent * 100),
           });
-
-          // Get swap transaction
           const swapTx = await getJupiterSwapTx(quote, walletAddress, Math.round(slippagePercent * 100));
-
-          // Sign and send
           const swapSig = await signAndSendTransaction(swapTx, walletAdapter, connection);
           signatures.push(swapSig);
-          steps.push(`✅ Swapped ${borrowUsd.toFixed(2)} USDC → target token: ${swapSig.slice(0, 8)}…`);
+          steps.push(`✅ Swapped ${borrowUsd.toFixed(2)} USDC → target: ${swapSig.slice(0, 8)}…`);
         } catch (swapErr: any) {
-          // Swap failure is non-fatal — user still has the USDC from Kamino
           const swapMsg = swapErr?.message ?? String(swapErr);
           steps.push(`⚠ Swap failed: ${swapMsg.slice(0, 150)}`);
-          steps.push(`Your USDC is safe in your wallet. Swap manually on Jupiter.`);
+          steps.push(`Your USDC is in your wallet. Swap manually on Jupiter.`);
         }
       }
+
+      return { signatures, steps, provider: "kamino" };
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      steps.push(`Kamino failed: ${msg.slice(0, 100)}`);
+      // Fall through to spot swap
+    }
+  }
+
+  // ── Strategy 3: Pure Jupiter spot swap (1x, no leverage) ─────────
+  try {
+    const effectiveLeverage = leverage > 1 ? leverage : 1;
+    const isLeveraged = effectiveLeverage > 1;
+
+    if (isLeveraged) {
+      steps.push(`⚠ Leverage not available for this token. Buying spot instead.`);
     }
 
-    return { signatures, steps };
-  } catch (error: any) {
+    steps.push(`Swapping SOL → target token via Jupiter (1x spot)…`);
+
+    const solPrice = params.solPrice ?? await getSolPrice();
+    const totalUsd = collateralSol * solPrice * effectiveLeverage;
+    // For spot, just swap the SOL we have
+    const solLamports = solToRaw(collateralSol);
+
+    const quote = await getJupiterQuote({
+      inputMint: SOL_MINT,
+      outputMint: targetMint,
+      amount: solLamports,
+      slippageBps: Math.round(slippagePercent * 100),
+    });
+
+    const swapTx = await getJupiterSwapTx(quote, walletAddress, Math.round(slippagePercent * 100));
+    const sig = await signAndSendTransaction(swapTx, walletAdapter, connection);
+    signatures.push(sig);
+    steps.push(`✅ Spot swap complete: ${sig.slice(0, 8)}…`);
+
+    if (isLeveraged) {
+      steps.push(`Note: This is a 1x spot buy, not leveraged. Leverage pools not available for this token.`);
+    }
+
+    return { signatures, steps, provider: "spot" };
+  } catch (e: any) {
+    const msg = e?.message ?? String(e);
+    const error: any = new Error(`All strategies failed. Last error: ${msg}`);
     error.steps = steps;
     error.signatures = signatures;
     throw error;

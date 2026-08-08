@@ -228,7 +228,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
         {mode === "perps" ? (
           <>Perpetual contracts. Long &amp; short with up to {market?.maxLeverage ?? 20}x leverage. EVM wallet.</>
         ) : (
-          <>Deposit SOL → borrow USDC (Kamino) → swap to any token (Jupiter). Long only, up to 5×.</>
+          <>Leveraged long on any Solana token. Tries Lavarage → Kamino → spot swap. Solana wallet required.</>
         )}
       </div>
 
@@ -402,13 +402,13 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
             <span className="text-bear">${estLiquidation.toFixed(2)}</span>
           </div>
         )}
-        {mode === "spot" && metrics && (
+        {mode === "spot" && metrics && leverage > 1 && (
           <div className="flex justify-between text-bull">
             <span>Borrow</span>
-            <span>${metrics.borrowUsd.toFixed(2)} from Kamino</span>
+            <span>${metrics.borrowUsd.toFixed(2)}</span>
           </div>
         )}
-        {mode === "spot" && metrics && (
+        {mode === "spot" && metrics && leverage > 1 && (
           <div className="flex justify-between text-bear">
             <span>Liquidation</span>
             <span>−{metrics.liquidationDropPct.toFixed(1)}% drop</span>
@@ -436,7 +436,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
 
       {/* Wallet hint */}
       <div className="mt-3 text-[10px] text-muted text-center">
-        {mode === "perps" ? "EVM wallet (MetaMask/Rabby) — perps on Hyperliquid" : "Solana wallet (Phantom) — perps on Drift + spot leverage"}
+        {mode === "perps" ? "EVM wallet (MetaMask/Rabby) — perps on Hyperliquid" : "Solana wallet (Phantom) — Lavarage / Kamino / Jupiter"}
       </div>
 
       {err && (
