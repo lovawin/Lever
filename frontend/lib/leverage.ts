@@ -36,8 +36,10 @@ const KAMINO_DIALECT_API = "https://kamino.dial.to/api";
 // Kamino REST API — market metadata
 const KAMINO_REST_API = "https://api.kamino.finance";
 
-// Jupiter Quote + Swap API
-const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6";
+// Jupiter Swap API v1 (lite) — requires API key for production rate limits
+// Get key at https://developers.jup.ag/portal
+const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1";
+const JUPITER_API_KEY = process.env.NEXT_PUBLIC_JUPITER_API_KEY || "";
 
 // Known Kamino markets — SOL collateral + USDC debt pairs
 const KAMINO_MARKETS: Record<string, { address: string; name: string }> = {
@@ -388,13 +390,16 @@ export interface JupiterQuote {
 }
 
 export async function getJupiterQuote(params: JupiterQuoteParams): Promise<JupiterQuote> {
-  const url = new URL(`${JUPITER_QUOTE_API}/quote`);
+  const url = new URL(`${JUPITER_SWAP_API}/quote`);
   url.searchParams.set("inputMint", params.inputMint);
   url.searchParams.set("outputMint", params.outputMint);
   url.searchParams.set("amount", String(params.amount));
   url.searchParams.set("slippageBps", String(params.slippageBps ?? 100));
 
-  const r = await fetch(url.toString());
+  const headers: Record<string, string> = {};
+  if (JUPITER_API_KEY) headers["x-api-key"] = JUPITER_API_KEY;
+
+  const r = await fetch(url.toString(), { headers });
   if (!r.ok) {
     const err = await r.text();
     throw new Error(`Jupiter quote failed (${r.status}): ${err}`);
@@ -407,9 +412,12 @@ export async function getJupiterSwapTx(
   wallet: string,
   slippageBps = 100,
 ): Promise<string> {
-  const r = await fetch(`${JUPITER_QUOTE_API}/swap`, {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (JUPITER_API_KEY) headers["x-api-key"] = JUPITER_API_KEY;
+
+  const r = await fetch(`${JUPITER_SWAP_API}/swap`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       quoteResponse,
       userPublicKey: wallet,
