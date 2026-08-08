@@ -10,6 +10,7 @@ import {
   type TokenSearchResult,
   calculateLeverageMetrics,
   openLeveragePosition,
+  getSolPrice,
 } from "@/lib/leverage";
 import { calculateTradeFees, formatUsd, type FeeTier } from "@/lib/fees";
 
@@ -144,8 +145,18 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
           throw new Error("Wallet does not support transaction signing. Use Phantom or Solflare.");
         }
 
-        // Convert USD amount to SOL amount for Kamino deposit
-        const solPrice = parseFloat(mids["SOL"] ?? mids["sOL"] ?? "150");
+        // Get SOL price — try live mids first, then DexScreener fallback
+        let solPrice: number;
+        const midSol = mids["SOL"] ?? mids["sOL"];
+        if (midSol && parseFloat(midSol) > 0) {
+          solPrice = parseFloat(midSol);
+        } else {
+          try {
+            solPrice = await getSolPrice();
+          } catch {
+            solPrice = 175; // hardcoded fallback
+          }
+        }
         const collateralSol = sizeUsd / solPrice;
 
         const { signatures, steps } = await openLeveragePosition({
@@ -156,6 +167,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
           leverage: levCapped,
           targetMint: selectedToken.mint,
           slippagePercent: 1,
+          solPrice,
         });
 
         setResult(
@@ -216,7 +228,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
         {mode === "perps" ? (
           <>Perpetual contracts. Long &amp; short with up to {market?.maxLeverage ?? 20}x leverage. EVM wallet.</>
         ) : (
-          <>Solana perps (Drift) + leveraged spot. Long & short on Drift pairs, long-only on others. Solana wallet.</>
+          <>Deposit SOL → borrow USDC (Kamino) → swap to any token (Jupiter). Long only, up to 5×.</>
         )}
       </div>
 
@@ -269,7 +281,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
               type="text"
               value={tokenQuery}
               onChange={(e) => { setTokenQuery(e.target.value); setSelectedToken(null); }}
-              placeholder="Search by name or paste mint address…"
+              placeholder="Search by name, symbol, or paste mint address…"
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-bull/50 placeholder:text-muted/50"
             />
             {searching && (
