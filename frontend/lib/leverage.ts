@@ -29,7 +29,7 @@ const USDC_DECIMALS = 6;
 
 // Lavarage API — spot leverage for any token
 const LAVARAGE_API = "https://api.lavarage.xyz";
-const LAVARAGE_API_KEY = process.env.NEXT_PUBLIC_LAVARAGE_API_KEY || "";
+export const LAVARAGE_API_KEY = process.env.NEXT_PUBLIC_LAVARAGE_API_KEY || "";
 
 // Kamino Dialect (Blinks) API — CORS-enabled, returns signed transactions
 const KAMINO_DIALECT_API = "https://kamino.dial.to/api";
@@ -616,10 +616,20 @@ export async function openLeveragePosition(params: OpenLeveragePositionParams): 
     steps.push("Lavarage not configured (no API key), trying Kamino…");
   }
 
-  // ── Strategy 2: Kamino + Jupiter swap (SOL collateral + USDC debt) ──
-  // Only works for SOL collateral → borrow USDC → swap to target
-  if (targetMint !== SOL_MINT) {
-    // Target isn't SOL, so we can deposit SOL → borrow USDC → swap to target
+  // ── Strategy 2: Kamino (SOL-collateral leverage) ──
+  // Kamino borrows USDC internally — the borrowed USDC stays in Kamino's reserves,
+  // NOT in the user's wallet. So we can only long SOL here (not arbitrary tokens).
+  // For arbitrary tokens, use Lavarage (Strategy 1) or spot swap (Strategy 3).
+  //
+  // Note: Kamino's openPosition tx already includes a Jupiter swap internally
+  // when the target token differs from the debt token. We don't need a separate swap.
+  // The `debtTokenMint` param tells Kamino what to borrow; if we pass the target
+  // token as debtTokenMint, Kamino handles the swap within the position tx.
+  //
+  // However, Kamino only supports specific debt tokens per market (mostly USDC).
+  // So for now, Kamino = long SOL with leverage (borrow USDC against SOL).
+  if (targetMint === SOL_MINT && leverage > 1) {
+    // Long SOL with leverage via Kamino — SOL collateral, USDC debt
     try {
       const market = KAMINO_MARKETS.main;
 
@@ -642,13 +652,12 @@ export async function openLeveragePosition(params: OpenLeveragePositionParams): 
         } else if (msg.includes("403") || msg.includes("rate") || msg.includes("429") || msg.includes("Forbidden")) {
           throw new Error(`RPC error during Kamino setup. Your Solana RPC may be rate-limited. Try using a private RPC (Helius, QuickNode) or retry later.\n\nDetails: ${msg}`);
         } else {
-          // Setup might have failed but obligation could already exist — continue
           steps.push(`Setup skipped: ${msg.slice(0, 100)}`);
         }
       }
 
-      // Step 2b: Open Kamino leveraged position (deposit SOL, borrow USDC)
-      steps.push("Opening Kamino position (deposit SOL, borrow USDC)…");
+      // Step 2b: Open Kamino leveraged SOL position
+      steps.push("Opening Kamino leveraged SOL position…");
       const positionTx = await kaminoOpenPosition({
         wallet: walletAddress,
         market: market.address,
@@ -660,35 +669,7 @@ export async function openLeveragePosition(params: OpenLeveragePositionParams): 
       });
       const positionSig = await signAndSendTransaction(positionTx, walletAdapter, connection);
       signatures.push(positionSig);
-      steps.push(`✅ Position opened: ${positionSig.slice(0, 8)}…`);
-
-      // Step 2c: Swap borrowed USDC → target token via Jupiter
-      steps.push("Swapping borrowed USDC → target token via Jupiter…");
-      const solPrice = params.solPrice ?? await getSolPrice();
-      const collateralUsd = collateralSol * solPrice;
-      const borrowUsd = collateralUsd * (leverage - 1);
-      const borrowUsdcRaw = usdcToRaw(borrowUsd);
-
-      if (borrowUsdcRaw < 1000) {
-        steps.push("⚠ Borrowed amount too small to swap, skipping");
-      } else {
-        try {
-          const quote = await getJupiterQuote({
-            inputMint: USDC_MINT,
-            outputMint: targetMint,
-            amount: borrowUsdcRaw,
-            slippageBps: Math.round(slippagePercent * 100),
-          });
-          const swapTx = await getJupiterSwapTx(quote, walletAddress, Math.round(slippagePercent * 100));
-          const swapSig = await signAndSendTransaction(swapTx, walletAdapter, connection);
-          signatures.push(swapSig);
-          steps.push(`✅ Swapped ${borrowUsd.toFixed(2)} USDC → target: ${swapSig.slice(0, 8)}…`);
-        } catch (swapErr: any) {
-          const swapMsg = swapErr?.message ?? String(swapErr);
-          steps.push(`⚠ Swap failed: ${swapMsg.slice(0, 150)}`);
-          steps.push(`Your USDC is in your wallet. Swap manually on Jupiter.`);
-        }
-      }
+      steps.push(`✅ Leveraged SOL position opened: ${positionSig.slice(0, 8)}…`);
 
       return { signatures, steps, provider: "kamino" };
     } catch (e: any) {
@@ -696,6 +677,9 @@ export async function openLeveragePosition(params: OpenLeveragePositionParams): 
       steps.push(`Kamino failed: ${msg.slice(0, 100)}`);
       // Fall through to spot swap
     }
+  } else if (targetMint !== SOL_MINT) {
+    // Can't leverage arbitrary tokens on Kamino — Lavarage needed for true leverage on memecoins
+    steps.push("Kamino only supports SOL leverage. For memecoins, use Lavarage (needs API key).");
   }
 
   // ── Strategy 3: Pure Jupiter spot swap (1x, no leverage) ─────────

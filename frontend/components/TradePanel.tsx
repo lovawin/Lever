@@ -11,6 +11,9 @@ import {
   calculateLeverageMetrics,
   openLeveragePosition,
   getSolPrice,
+  SOL_MINT,
+  USDC_MINT,
+  LAVARAGE_API_KEY,
 } from "@/lib/leverage";
 import { calculateTradeFees, formatUsd, type FeeTier } from "@/lib/fees";
 
@@ -228,7 +231,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
         {mode === "perps" ? (
           <>Perpetual contracts. Long &amp; short with up to {market?.maxLeverage ?? 20}x leverage. EVM wallet.</>
         ) : (
-          <>Leveraged long on any Solana token. Tries Lavarage → Kamino → spot swap. Solana wallet required.</>
+                    <>Leveraged long on any Solana token. Tries Lavarage (any token) → Kamino (SOL only) → spot swap (1x). Solana wallet required.</>
         )}
       </div>
 
@@ -322,9 +325,11 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
               <button onClick={() => { setSelectedToken(null); setTokenQuery(""); }} className="text-muted hover:text-white ml-1">✕</button>
             </div>
           )}
-          <div className="text-xs text-muted mt-1 mb-4 font-mono">
-            Any Solana token — powered by DexScreener + Jupiter
+        {mode === "spot" && selectedToken && selectedToken.mint !== SOL_MINT && leverage > 1 && !LAVARAGE_API_KEY && (
+          <div className="text-[10px] text-bear bg-bear/10 border border-bear/20 rounded-lg px-3 py-2 mb-3">
+            ⚠ Leverage on memecoins requires a Lavarage API key (pending approval). Falling back to 1x spot swap.
           </div>
+        )}
         </>
       )}
 
