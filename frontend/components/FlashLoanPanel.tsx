@@ -164,20 +164,26 @@ function FlashLoanPanelInner() {
             FlashLoanStrategy,
             (typeof STRATEGY_META)[FlashLoanStrategy],
           ][]
-        ).map(([key, m]) => (
-          <button
-            key={key}
-            onClick={() => setStrategy(key)}
-            className={`py-2.5 px-2 rounded-xl font-bold text-[10px] tracking-wide transition-all duration-200 border text-center ${
-              strategy === key
-                ? `${m.bgColor} ${m.borderColor} ${m.color} border`
-                : "bg-white/[0.03] border-white/5 text-muted hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <span className="block text-base mb-0.5">{m.emoji}</span>
-            {m.label}
-          </button>
-        ))}
+        ).map(([key, m]) => {
+          const disabled = key === "self_liquidation";
+          return (
+            <button
+              key={key}
+              onClick={() => !disabled && setStrategy(key)}
+              className={`py-2.5 px-2 rounded-xl font-bold text-[10px] tracking-wide transition-all duration-200 border text-center relative ${
+                disabled
+                  ? "bg-white/[0.02] border-white/5 text-muted/30 cursor-not-allowed"
+                  : strategy === key
+                    ? `${m.bgColor} ${m.borderColor} ${m.color} border`
+                    : "bg-white/[0.03] border-white/5 text-muted hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <span className="block text-base mb-0.5">{m.emoji}</span>
+              {m.label}
+              {disabled && <span className="block text-[8px] text-bear/60">Coming soon</span>}
+            </button>
+          );
+        })}
       </div>
 
       {/* Strategy description */}
@@ -187,6 +193,20 @@ function FlashLoanPanelInner() {
         <p className="text-[11px] leading-relaxed text-white/70">
           {meta.description}
         </p>
+        {strategy === "leverage_loop" && (
+          <div className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+            <p className="text-[10px] text-yellow-300">
+              ⚠️ Requires USDC approval & deposit into LeverVault. Your deposit becomes margin for the leveraged position.
+            </p>
+          </div>
+        )}
+        {strategy === "self_liquidation" && (
+          <div className="mt-2 p-2 bg-bear/10 border border-bear/20 rounded-lg">
+            <p className="text-[10px] text-bear">
+              ⛔ Requires an open LeverVault position to close. This strategy will revert without one.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Amount Input */}
