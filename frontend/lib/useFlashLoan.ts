@@ -29,7 +29,7 @@ const AAVE_V3_POOL_ARBITRUM = "0x794a61358D6845594F94dc1DB02A252b5b4814aD" as `0
 const USDC_ARBITRUM = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as `0x${string}`;
 
 // FlashLoanReceiver on Arbitrum
-const FLASH_LOAN_RECEIVER = "0x30d922192be4c276f744beb9fde04a8dfb362c12" as `0x${string}`;
+const FLASH_LOAN_RECEIVER = "0x390dceee8ae15b0550ec7de5005f2d0f7a34fef4" as `0x${string}`;
 
 // ─── Strategy IDs ────────────────────────────────────────────────────────
 
@@ -118,7 +118,7 @@ export function useFlashLoan(
         const closeFee = BigInt(Math.floor(safeAmount * 0.01 * 1e6));
         const profitFee = BigInt(Math.floor(safeAmount * 0.005 * 1e6));
         const marginReturn = BigInt(Math.floor(safeAmount * 1e6));
-        const inner = abiEncodeSelfLiquidation(0n, closeFee, profitFee, 0n, marginReturn);
+        const inner = abiEncodeSelfLiquidation(userAddr, 0n, closeFee, profitFee, 0n, marginReturn);
         params = `0x${strategyId.toString(16).padStart(2, "0")}${inner.slice(2)}` as `0x${string}`;
       } else {
         const depositAmount = BigInt(Math.floor(safeAmount * 1e6));
@@ -183,15 +183,16 @@ function abiEncodeArbitrage(buyToken: `0x${string}`, poolFee: number, minProfit:
 }
 
 function abiEncodeSelfLiquidation(
-  positionId: bigint, closeFee: bigint, profitFee: bigint, pnl: bigint, marginReturn: bigint
+  userAddress: `0x${string}`, positionId: bigint, closeFee: bigint, profitFee: bigint, pnl: bigint, marginReturn: bigint
 ): `0x${string}` {
   const padded = (val: bigint, bytes: number) => val.toString(16).padStart(bytes * 2, "0");
+  const addr = userAddress.toLowerCase().slice(2).padStart(64, "0");
   const posId = padded(positionId, 32);
   const cf = padded(closeFee, 32);
   const pf = padded(profitFee, 32);
   const p = padded(pnl < 0n ? (BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff") + 1n + pnl) : pnl, 32);
   const mr = padded(marginReturn, 32);
-  return `0x${posId}${cf}${pf}${p}${mr}` as `0x${string}`;
+  return `0x${addr}${posId}${cf}${pf}${p}${mr}` as `0x${string}`;
 }
 
 function abiEncodeLeverageLoop(userAddress: `0x${string}`, depositAmount: bigint, leverageBps: bigint): `0x${string}` {

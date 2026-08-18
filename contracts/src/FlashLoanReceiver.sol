@@ -281,8 +281,10 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
     }
 
     /**
-     * @notice Self-liquidation: borrow USDC → close position → repay.
-     * @param strategyParams Encoded: (positionId, closeFee, profitFee, pnl, marginReturn)
+     * @notice Self-liquidation: borrow USDC → close position → withdraw to repay Aave.
+     * @dev User must have an open position in LeverVault.
+     *      Flow: receive USDC from Aave → closePosition → withdrawFor(user) → repay Aave.
+     * @param strategyParams Encoded: (userAddress, positionId, closeFee, profitFee, pnl, marginReturn)
      */
     function _executeSelfLiquidation(
         address asset,
@@ -291,14 +293,16 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
         bytes memory strategyParams
     ) internal returns (int256) {
         (
+            address userAddress,
             bytes32 positionId,
             uint256 closeFee,
             uint256 profitFee,
             int256 pnl,
             uint256 marginReturn
-        ) = abi.decode(strategyParams, (bytes32, uint256, uint256, int256, uint256));
+        ) = abi.decode(strategyParams, (address, bytes32, uint256, uint256, int256, uint256));
 
-        // The position is closed via the vault operator
+        // Step 1: Close the position via vault operator
+        // This credits userReturn to the user's vault balance
         vault.closePosition(
             positionId,
             closeFee,
@@ -308,7 +312,14 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
             ""
         );
 
-        int256 profit = int256(marginReturn) - int256(amount + premium);
+        // Step 2: Withdraw from user's vault balance to repay Aave
+        uint256 repayment = amount + premium;
+        vault.withdrawFor(userAddress, repayment);
+        // USDC is now in this contract, ready for Aave to pull via approval
+
+        // Profit = margin return - repayment
+        // If marginReturn > repayment, user keeps the difference in the vault
+        int256 profit = int256(marginReturn) - int256(repayment);
 
         return profit;
     }

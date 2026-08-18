@@ -83,7 +83,7 @@ const STRATEGY_META: Record<
     label: "Leverage Loop",
     emoji: "🔄",
     description:
-      "Borrow USDC from Aave, deposit into vault for leveraged positions. Requires pre-deposited collateral in vault.",
+      "Amplify your vault position with Aave flash loans. Deposit collateral first, then borrow to leverage up.",
     color: "text-purple-400",
     bgColor: "bg-purple-500/10",
     borderColor: "border-purple-500/20",
@@ -165,7 +165,7 @@ function FlashLoanPanelInner() {
             (typeof STRATEGY_META)[FlashLoanStrategy],
           ][]
         ).map(([key, m]) => {
-          const disabled = key === "self_liquidation";
+          const disabled = key === "self_liquidation" || key === "leverage_loop";
           return (
             <button
               key={key}
@@ -196,7 +196,7 @@ function FlashLoanPanelInner() {
         {strategy === "leverage_loop" && (
           <div className="mt-2 p-2 bg-purple-500/10 border border-purple-500/20 rounded-lg">
             <p className="text-[10px] text-purple-300">
-              🔄 Requires USDC pre-deposited in LeverVault. Flash loan deposits additional USDC, opens leveraged position, then withdraws to repay Aave. Net cost: Aave fee (0.05%).
+              🔄 Leverage loops via flash loans require the vault to hold margin for repayment — but margin is sent to Hyperliquid for trading. Architectural redesign in progress.
             </p>
           </div>
         )}
