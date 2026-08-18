@@ -127,8 +127,10 @@ const USDC_ABI = [
   },
 ] as const;
 
-// Arbitrum USDC
+// Arbitrum USDC (native)
 const USDC_ARB = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as `0x${string}`;
+// Arbitrum USDC.e (bridged)
+const USDC_BRIDGED = "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8" as `0x${string}`;
 const USDC_DECIMALS = 6;
 
 // Vault address from env
@@ -145,7 +147,8 @@ export type VaultStatus = {
 
 export type VaultBalances = {
   vaultBalance: number;   // USDC in vault
-  walletBalance: number;  // USDC in wallet
+  walletBalance: number;  // USDC in wallet (native)
+  bridgedBalance: number; // USDC.e in wallet (bridged)
   allowance: number;      // USDC approved for vault
   needsApproval: boolean; // true if allowance < deposit amount
   isSolvent: boolean;
@@ -178,7 +181,7 @@ export function useVault() {
 
     setLoading(true);
     try {
-      const [vaultBal, walletBal, allowance, solvent, paused] = await Promise.all([
+      const [vaultBal, walletBal, bridgedBal, allowance, solvent, paused] = await Promise.all([
         publicClient.readContract({
           address: VAULT_ADDRESS,
           abi: VAULT_ABI,
@@ -187,6 +190,12 @@ export function useVault() {
         }),
         publicClient.readContract({
           address: USDC_ARB,
+          abi: USDC_ABI,
+          functionName: "balanceOf",
+          args: [address],
+        }),
+        publicClient.readContract({
+          address: USDC_BRIDGED,
           abi: USDC_ABI,
           functionName: "balanceOf",
           args: [address],
@@ -211,11 +220,13 @@ export function useVault() {
 
       const vaultBalance = Number(formatUnits(vaultBal as bigint, USDC_DECIMALS));
       const walletBalance = Number(formatUnits(walletBal as bigint, USDC_DECIMALS));
+      const bridgedBalance = Number(formatUnits(bridgedBal as bigint, USDC_DECIMALS));
       const allowanceVal = Number(formatUnits(allowance as bigint, USDC_DECIMALS));
 
       setBalances({
         vaultBalance,
         walletBalance,
+        bridgedBalance,
         allowance: allowanceVal,
         needsApproval: allowanceVal < walletBalance,
         isSolvent: solvent as boolean,
@@ -431,6 +442,83 @@ export function useVault() {
     setError(null);
   }, []);
 
+  // ─── Swap bridged USDC.e to native USDC ─────────────────────────────────
+  const swapBridgedToNative = useCallback(async (amount?: number) => {
+    if (!walletClient || !address || !publicClient) return;
+    const swapAmount = amount ?? (balances?.bridgedBalance ?? 0);
+    if (swapAmount <= 0) return;
+    const amountIn = parseUnits(swapAmount.toString(), USDC_DECIMALS);
+
+    setTxState("pending");
+    setTxHash(null);
+    setError(null);
+
+    try {
+      // 1. Approve router to spend bridged USDC
+      const ROUTER = "0x68b3465833Fb72a70EC138488f5723cE294c6D30" as `0x${string}`;
+      const { request: approveReq } = await publicClient.simulateContract({
+        address: USDC_BRIDGED,
+        abi: USDC_ABI,
+        functionName: "approve",
+        args: [ROUTER, amountIn],
+        account: address,
+      });
+      const approveHash = await walletClient.writeContract(approveReq);
+      setTxHash(approveHash);
+      setTxState("confirming");
+      await publicClient.waitForTransactionReceipt({ hash: approveHash });
+
+      // 2. Swap via Uniswap V3 (0.01% fee pool)
+      const SWAP_ABI = [
+        {
+          inputs: [{ name: "params", type: "tuple", components: [
+            { name: "tokenIn", type: "address" },
+            { name: "tokenOut", type: "address" },
+            { name: "fee", type: "uint24" },
+            { name: "recipient", type: "address" },
+            { name: "amountIn", type: "uint256" },
+            { name: "amountOutMinimum", type: "uint256" },
+            { name: "sqrtPriceLimitX96", type: "uint160" },
+          ]}],
+          name: "exactInputSingle",
+          outputs: [{ name: "amountOut", type: "uint256" }],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+      ] as const;
+
+      // 0.5% slippage tolerance
+      const minOut = amountIn * 995n / 1000n;
+
+      const { request: swapReq } = await publicClient.simulateContract({
+        address: ROUTER,
+        abi: SWAP_ABI,
+        functionName: "exactInputSingle",
+        args: [{
+          tokenIn: USDC_BRIDGED,
+          tokenOut: USDC_ARB,
+          fee: 100,
+          recipient: address,
+          amountIn,
+          amountOutMinimum: minOut,
+          sqrtPriceLimitX96: 0n,
+        }],
+        account: address,
+      });
+      const swapHash = await walletClient.writeContract(swapReq);
+      setTxHash(swapHash);
+      setTxState("confirming");
+      await publicClient.waitForTransactionReceipt({ hash: swapHash });
+
+      setTxState("success");
+      refreshBalances();
+    } catch (err: any) {
+      console.error("Swap failed:", err);
+      setError(err?.shortMessage || err?.message || "Swap failed");
+      setTxState("error");
+    }
+  }, [walletClient, address, publicClient, balances?.bridgedBalance]);
+
   return {
     // State
     address,
@@ -453,5 +541,6 @@ export function useVault() {
     withdrawAll,
     emergencyWithdraw,
     resetTx,
+    swapBridgedToNative,
   };
 }

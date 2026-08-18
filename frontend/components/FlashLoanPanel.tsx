@@ -4,6 +4,7 @@ import { useState, useMemo, Component, type ReactNode } from "react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useFlashLoan, type FlashLoanStrategy } from "@/lib/useFlashLoan";
+import { useVault } from "@/lib/useVault";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────
 
@@ -119,10 +120,13 @@ function calcQuote(strategy: FlashLoanStrategy, amountUsd: number, leverage: num
 
 function FlashLoanPanelInner() {
   const { isConnected } = useAccount();
+  const vault = useVault();
 
   const [strategy, setStrategy] = useState<FlashLoanStrategy>("arbitrage");
   const [amountUsd, setAmountUsd] = useState(1000);
   const [leverage, setLeverage] = useState(5);
+  const [depositAmt, setDepositAmt] = useState("");
+  const [withdrawAmt, setWithdrawAmt] = useState("");
 
   const { execute, txState, txHash, error, reset } = useFlashLoan(strategy, amountUsd, leverage);
 
@@ -488,6 +492,143 @@ function FlashLoanPanelInner() {
         >
           {txState === "success" ? "Execute Another" : "Try Again"}
         </button>
+      )}
+
+      {/* Vault Account — Deposit / Withdraw */}
+      {isConnected && (
+        <div className="mt-4 p-4 bg-white/[0.02] border border-white/[0.06] rounded-xl">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-white">💎 Vault Account</h3>
+            <button
+              onClick={() => vault.refreshBalances()}
+              className="text-[10px] text-muted hover:text-white transition-colors"
+            >
+              ↻ Refresh
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div className="p-2.5 bg-white/[0.03] rounded-lg">
+              <div className="text-[10px] text-muted uppercase tracking-wider">Wallet</div>
+              <div className="text-base font-bold font-mono">
+                ${vault.balances?.walletBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) ?? "—"}
+              </div>
+              <div className="text-[9px] text-muted">USDC</div>
+            </div>
+            <div className="p-2.5 bg-white/[0.03] rounded-lg">
+              <div className="text-[10px] text-muted uppercase tracking-wider">USDC.e</div>
+              <div className="text-base font-bold font-mono text-yellow-400">
+                ${vault.balances?.bridgedBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) ?? "—"}
+              </div>
+              <div className="text-[9px] text-muted">Bridged</div>
+            </div>
+            <div className="p-2.5 bg-white/[0.03] rounded-lg">
+              <div className="text-[10px] text-muted uppercase tracking-wider">Vault</div>
+              <div className="text-base font-bold font-mono text-bull">
+                ${vault.balances?.vaultBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) ?? "—"}
+              </div>
+              <div className="text-[9px] text-muted">USDC</div>
+            </div>
+          </div>
+
+          {(vault.balances?.bridgedBalance ?? 0) > 0 && (
+            <button
+              onClick={() => vault.swapBridgedToNative()}
+              disabled={vault.txState === "pending" || vault.txState === "confirming"}
+              className="mb-2 w-full py-2 rounded-lg bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-xs font-bold hover:bg-yellow-500/30 transition-all disabled:opacity-40">
+              {vault.txState === "pending" || vault.txState === "confirming"
+                ? "Swapping..."
+                : `Swap ${(vault.balances?.bridgedBalance ?? 0).toFixed(2)} USDC.e → USDC`}
+            </button>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            {/* Deposit */}
+            <div>
+              <div className="flex gap-1.5">
+                <input
+                  type="number"
+                  placeholder="0.00"
+                  value={depositAmt}
+                  onChange={e => setDepositAmt(e.target.value)}
+                  className="flex-1 px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 text-sm font-mono text-white placeholder:text-white/20 focus:outline-none focus:border-bull/40"
+                />
+                <button
+                  onClick={() => {
+                    const bal = vault.balances?.walletBalance ?? 0;
+                    setDepositAmt(bal > 0 ? Math.floor(bal * 100) / 100 : "0");
+                  }}
+                  className="px-2 py-2 rounded-lg bg-white/5 border border-white/10 text-[10px] text-muted hover:text-white hover:border-white/20 transition-all"
+                >
+                  MAX
+                </button>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!depositAmt || parseFloat(depositAmt) <= 0) return;
+                  vault.resetTx();
+                  if (vault.balances?.needsApproval !== false) {
+                    await vault.approve();
+                  }
+                  await vault.deposit(parseFloat(depositAmt));
+                }}
+                disabled={vault.txState === "pending" || vault.txState === "confirming" || !depositAmt || parseFloat(depositAmt) <= 0}
+                className="mt-1.5 w-full py-2 rounded-lg bg-bull/80 text-black text-xs font-bold hover:bg-bull transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {vault.balances?.needsApproval !== false ? "Approve & Deposit" : "Deposit"}
+              </button>
+            </div>
+
+            {/* Withdraw */}
+            <div>
+              <div className="flex gap-1.5">
+                <input
+                  type="number"
+                  placeholder="0.00"
+                  value={withdrawAmt}
+                  onChange={e => setWithdrawAmt(e.target.value)}
+                  className="flex-1 px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 text-sm font-mono text-white placeholder:text-white/20 focus:outline-none focus:border-bull/40"
+                />
+                <button
+                  onClick={() => {
+                    const bal = vault.balances?.vaultBalance ?? 0;
+                    setWithdrawAmt(bal > 0 ? Math.floor(bal * 100) / 100 : "0");
+                  }}
+                  className="px-2 py-2 rounded-lg bg-white/5 border border-white/10 text-[10px] text-muted hover:text-white hover:border-white/20 transition-all"
+                >
+                  MAX
+                </button>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!withdrawAmt || parseFloat(withdrawAmt) <= 0) return;
+                  vault.resetTx();
+                  await vault.withdraw(parseFloat(withdrawAmt));
+                }}
+                disabled={vault.txState === "pending" || vault.txState === "confirming" || !withdrawAmt || parseFloat(withdrawAmt) <= 0}
+                className="mt-1.5 w-full py-2 rounded-lg bg-white/10 text-white text-xs font-bold hover:bg-white/15 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Withdraw
+              </button>
+            </div>
+          </div>
+
+          {vault.txHash && (
+            <a
+              href={`https://arbiscan.io/tx/${vault.txHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block mt-2 text-center text-[10px] text-bull underline"
+            >
+              View on Arbiscan ↗
+            </a>
+          )}
+          {vault.error && (
+            <div className="mt-2 p-1.5 bg-bear/10 border border-bear/30 rounded text-[10px] text-bear">
+              {vault.error.slice(0, 150)}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Wallet hint */}
