@@ -65,7 +65,7 @@ const STRATEGY_META: Record<
     label: "Arbitrage",
     emoji: "⚡",
     description:
-      "Borrow USDC from Aave, buy low on one DEX, sell high on another, repay. Profit from price differences across exchanges.",
+      "Borrow USDC from Aave, execute a profitable swap across DEXs, repay in one tx. Requires a real price gap to profit — MEV bots compete for these.",
     color: "text-yellow-400",
     bgColor: "bg-yellow-500/10",
     borderColor: "border-yellow-500/20",
@@ -200,13 +200,20 @@ function FlashLoanPanelInner() {
             </p>
           </div>
         )}
+        {strategy === "arbitrage" && (
+          <div className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+            <p className="text-[10px] text-yellow-300">
+              ⚡ Requires a real price gap between DEXs. Same-pool swaps always lose money. This is for advanced MEV arbitrage — most users should use Perps or Spot Leverage instead.
+            </p>
+          </div>
+        )}
         {strategy === "self_liquidation" && (
           <div className="mt-2 p-2 bg-bear/10 border border-bear/20 rounded-lg">
             <p className="text-[10px] text-bear">
               ⛔ Requires an open LeverVault position to close. This strategy will revert without one.
             </p>
           </div>
-        )}
+        )}}
       </div>
 
       {/* Amount Input */}
