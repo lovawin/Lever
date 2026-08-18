@@ -206,7 +206,7 @@ export function calculateTradeFees(
     venueBps,
     totalFees,
     totalBps,
-    savingsVsBase,
+    savingsVsBase: savingsVsFree,
     withdrawalFee: 0,
     breakdown,
   };

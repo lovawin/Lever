@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import WalletBar from "@/components/WalletBar";
 import TradePanel from "@/components/TradePanel";
 import FlashLoanPanel from "@/components/FlashLoanPanel";
@@ -137,19 +137,44 @@ export default function Page() {
   );
 }
 
-// ─── Inline Coin Selector ────────────────────────────────────────────────
+// ─── Dynamic Coin Selector ────────────────────────────────────────────────
 
+// Memecoin tickers known on HL mainnet (top memecoins by volume)
 const MEMECOIN_PERPS = [
-  "PURR", "MOON", "JEFF", "HLN", "RAGE", "BALD", "SPX", "TRUMP",
-  "WIF", "POPE", "GIGA", "BRETT", "MOG", "PEPE", "FLOKI", "BONK",
+  "PURR", "WIF", "BRETT", "SPX", "TRUMP", "DOGE", "TURBO", "MEME",
+  "kPEPE", "kFLOKI", "kSHIB", "kBONK", "PURR/USDC",
 ];
+
+// Keywords to auto-detect memecoins from the full mid list
+const MEME_KEYWORDS = [
+  "PEPE", "DOGE", "SHIB", "FLOKI", "BONK", "WIF", "BRETT", "PURR",
+  "TRUMP", "MOG", "TURBO", "MEME", "SPX", "MAGA", "FIGHT", "KENDU",
+  "BODEN", "TREMP", "JEFF", "RAGE", "BALD", "POPE", "GIGA",
+];
+
+function isLikelyMemecoin(name: string): boolean {
+  if (MEMECOIN_PERPS.includes(name)) return true;
+  const upper = name.toUpperCase();
+  return MEME_KEYWORDS.some(kw => upper.includes(kw));
+}
 
 function CoinSelector({ selected, onSelect, mids }: { selected: string; onSelect: (c: string) => void; mids: Record<string, string> }) {
   const [search, setSearch] = useState("");
 
-  const filtered = MEMECOIN_PERPS.filter(c =>
-    c.toLowerCase().includes(search.toLowerCase())
-  );
+  // Build coin list: prioritize known memecoins, then search results
+  const allCoins = Object.keys(mids).filter(c => !c.startsWith("#") && !c.startsWith("@"));
+  const memecoinList = allCoins.filter(isLikelyMemecoin).sort((a, b) => {
+    // Sort known memecoins first, then alphabetical
+    const aKnown = MEMECOIN_PERPS.includes(a) ? 0 : 1;
+    const bKnown = MEMECOIN_PERPS.includes(b) ? 0 : 1;
+    if (aKnown !== bKnown) return aKnown - bKnown;
+    return a.localeCompare(b);
+  });
+
+  // If searching, filter all coins (not just memecoins)
+  const filtered = search.trim()
+    ? allCoins.filter(c => c.toLowerCase().includes(search.toLowerCase())).slice(0, 50)
+    : memecoinList.slice(0, 40);
 
   return (
     <div>
@@ -162,11 +187,14 @@ function CoinSelector({ selected, onSelect, mids }: { selected: string; onSelect
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search..."
+        placeholder="Search any perp market..."
         className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs font-mono mb-2 focus:outline-none focus:border-bull/50 placeholder:text-muted/50"
       />
 
       <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+        {filtered.length === 0 && (
+          <span className="text-xs text-muted py-2">No markets found</span>
+        )}
         {filtered.map(name => {
           const mid = mids[name];
           const midNum = mid ? parseFloat(mid) : 0;
