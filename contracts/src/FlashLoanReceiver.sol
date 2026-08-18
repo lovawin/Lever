@@ -40,6 +40,7 @@ interface IERC20 {
 
 interface ILeverVault {
     function deposit(uint256 amount) external;
+    function depositFor(address user, uint256 amount) external;
     function withdraw(uint256 amount) external;
     function balances(address user) external view returns (uint256);
     function openPosition(
@@ -327,21 +328,22 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
             uint256 leverageBps
         ) = abi.decode(strategyParams, (address, uint256, uint256));
 
-        // Step 1: Deposit borrowed USDC into vault on behalf of user
-        IERC20(USDC).approve(address(vault), depositAmount);
-        vault.deposit(depositAmount);
+        // Step 1: Deposit borrowed USDC into vault (credited to this contract)
+        IERC20(USDC).approve(address(vault), amount);
+        vault.deposit(amount);
 
-        // Step 2: Open position via operator (this contract acts as operator)
-        uint256 openFee = depositAmount / 100; // 1% open fee estimate
+        // Step 2: Open position via operator
+        // Use this contract as user since it holds the deposited balance
+        // Open fee = 0 for leverage loops (operator privilege)
         bytes32 positionId = keccak256(abi.encodePacked(
             userAddress, block.timestamp, "leverage_loop"
         ));
 
         vault.openPosition(
             positionId,
-            userAddress,
-            depositAmount,
-            openFee,
+            address(this),  // this contract holds the balance
+            amount,          // margin = full borrowed amount
+            0,               // open fee = 0 (operator can set any fee)
             "ETH",
             true,
             uint8(leverageBps / 100)

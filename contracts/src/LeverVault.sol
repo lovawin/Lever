@@ -235,6 +235,27 @@ contract LeverVault {
         emit Deposited(msg.sender, received);
     }
 
+    /** @notice Deposit USDC on behalf of another user (e.g. FlashLoanReceiver crediting a user)
+     *  @param user  Address that receives the credited balance
+     *  @param amount Amount of USDC to deposit
+     */
+    function depositFor(address user, uint256 amount) external whenNotPaused nonReentrant {
+        if (amount == 0) revert ZeroAmount();
+        if (amount < MIN_DEPOSIT) revert BelowMinimum();
+        if (amount > MAX_DEPOSIT) revert AboveMaximum();
+
+        uint256 before = USDC.balanceOf(address(this));
+        USDC.transferFrom(msg.sender, address(this), amount);
+        uint256 received = USDC.balanceOf(address(this)) - before;
+
+        if (received == 0) revert ZeroAmount();
+
+        balances[user] += received;
+        totalDeposits += received;
+
+        emit Deposited(user, received);
+    }
+
     // ─── Withdrawals ──────────────────────────────────────────────────────────
 
     /**

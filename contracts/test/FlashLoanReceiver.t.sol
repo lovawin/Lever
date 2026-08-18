@@ -63,6 +63,11 @@ contract MockVault is ILeverVault {
         balances[msg.sender] += amount;
     }
 
+    function depositFor(address user, uint256 amount) external override {
+        deposited += amount;
+        balances[user] += amount;
+    }
+
     function withdraw(uint256 amount) external override {
         withdrawn += amount;
         balances[msg.sender] -= amount;

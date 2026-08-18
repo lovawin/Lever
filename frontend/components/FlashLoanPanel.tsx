@@ -83,7 +83,7 @@ const STRATEGY_META: Record<
     label: "Leverage Loop",
     emoji: "🔄",
     description:
-      "Deposit $100, borrow $400 from Aave, trade with $500. Get 5x leverage with only $100 of your own capital.",
+      "Borrow USDC from Aave, deposit into vault for leveraged positions. Requires pre-deposited collateral. Coming soon.",
     color: "text-purple-400",
     bgColor: "bg-purple-500/10",
     borderColor: "border-purple-500/20",
@@ -120,7 +120,7 @@ function calcQuote(strategy: FlashLoanStrategy, amountUsd: number, leverage: num
 function FlashLoanPanelInner() {
   const { isConnected } = useAccount();
 
-  const [strategy, setStrategy] = useState<FlashLoanStrategy>("leverage_loop");
+  const [strategy, setStrategy] = useState<FlashLoanStrategy>("arbitrage");
   const [amountUsd, setAmountUsd] = useState(1000);
   const [leverage, setLeverage] = useState(5);
 
@@ -165,7 +165,7 @@ function FlashLoanPanelInner() {
             (typeof STRATEGY_META)[FlashLoanStrategy],
           ][]
         ).map(([key, m]) => {
-          const disabled = key === "self_liquidation";
+          const disabled = key === "self_liquidation" || key === "leverage_loop";
           return (
             <button
               key={key}
@@ -194,9 +194,9 @@ function FlashLoanPanelInner() {
           {meta.description}
         </p>
         {strategy === "leverage_loop" && (
-          <div className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-            <p className="text-[10px] text-yellow-300">
-              ⚠️ Requires USDC approval & deposit into LeverVault. Your deposit becomes margin for the leveraged position.
+          <div className="mt-2 p-2 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+            <p className="text-[10px] text-purple-300">
+              🔄 Leverage loops require the vault contract to be updated with depositFor(). Coming soon.
             </p>
           </div>
         )}
