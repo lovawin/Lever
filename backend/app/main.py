@@ -23,8 +23,16 @@ import secrets
 import httpx
 import json
 import re
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
+
+# Load .env before anything else
+from dotenv import load_dotenv
+_env_path = Path(__file__).parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+    print(f"[lever] Loaded env from {_env_path}")
 
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +52,10 @@ from .vault import (
     open_position as vault_open_position,
     close_position as vault_close_position,
 )
+from .flash_loan import (
+    get_flash_loan_engine, FlashLoanStrategy, FlashLoanStatus,
+)
+from .price_oracle import get_price_oracle
 
 app = FastAPI(title="Lever Trading", version="4.0.0")
 
@@ -834,6 +846,315 @@ async def preview_fees(req: FeePreviewRequest):
         "total_all_fees": open_fee + close_fee + profit_fee + venue_fee,
         "withdrawal_fee": 0,
     }
+
+
+# ─── Flash Loan ────────────────────────────────────────────────────────────────
+
+class FlashLoanRequest(BaseModel):
+    strategy: str = Field(..., description="arbitrage | self_liquidation | leverage_loop")
+    asset: str = Field(default="USDC", description="Token address or symbol")
+    amount_usd: float = Field(ge=10, le=500_000, description="Borrow amount in USD")
+    # For self_liquidation
+    position_id: str | None = None
+    # For leverage_loop
+    deposit_usd: float | None = None
+    leverage: float | None = Field(default=None, ge=2, le=100)
+    # For arbitrage
+    buy_dex: str | None = None
+    sell_dex: str | None = None
+
+    @validator("strategy")
+    def validate_strategy(cls, v):
+        valid = [s.value for s in FlashLoanStrategy]
+        if v not in valid:
+            raise ValueError(f"strategy must be one of: {valid}")
+        return v
+
+
+class FlashLoanQuoteRequest(BaseModel):
+    asset: str = Field(default="USDC")
+    amount_usd: float = Field(ge=10, le=500_000)
+    strategy: str = Field(default="arbitrage")
+
+    @validator("strategy")
+    def validate_strategy(cls, v):
+        valid = [s.value for s in FlashLoanStrategy]
+        if v not in valid:
+            raise ValueError(f"strategy must be one of: {valid}")
+        return v
+
+
+class FlashLoanQuoteResponse(BaseModel):
+    asset: str
+    amount_usd: float
+    aave_fee_usd: float
+    aave_fee_bps: int
+    lever_fee_usd: float = 0
+    lever_fee_bps: int = 0
+    total_fee_usd: float
+    gas_estimate_usd: float
+    min_profit_usd: float
+    max_borrow_usd: float
+    enabled: bool
+    ready: bool
+    fee_tier: str = "free"
+    treasury_fee_usd: float = 0
+    referrer_fee_usd: float = 0
+
+
+@app.get("/api/flash-loan/status")
+async def flash_loan_status():
+    """Flash loan engine status and stats."""
+    engine = get_flash_loan_engine()
+    return engine.get_stats()
+
+
+@app.post("/api/flash-loan/quote", response_model=FlashLoanQuoteResponse)
+async def flash_loan_quote(req: FlashLoanQuoteRequest, user: dict = Depends(get_current_user)):
+    """Estimate flash loan costs without executing. Shows fee breakdown."""
+    engine = get_flash_loan_engine()
+    tier = user.get("fee_tier", "free")
+    fees = engine.calculate_fee(req.amount_usd, tier)
+    gas_usd = 0.10  # rough Arbitrum gas cost
+    return FlashLoanQuoteResponse(
+        asset=req.asset,
+        amount_usd=req.amount_usd,
+        aave_fee_usd=fees["aave_fee_usd"],
+        aave_fee_bps=fees["aave_fee_bps"],
+        lever_fee_usd=fees["lever_fee_usd"],
+        lever_fee_bps=fees["lever_fee_bps"],
+        total_fee_usd=round(fees["total_fee_usd"] + gas_usd, 4),
+        gas_estimate_usd=gas_usd,
+        min_profit_usd=float(engine.min_profit_usd),
+        max_borrow_usd=float(engine.max_borrow_usd),
+        enabled=engine.enabled,
+        ready=engine.ready(),
+        fee_tier=tier,
+        treasury_fee_usd=fees["treasury_fee_usd"],
+        referrer_fee_usd=fees["referrer_fee_usd"],
+    )
+
+
+@app.post("/api/flash-loan/execute")
+@limiter.limit("5/minute")
+async def flash_loan_execute(request: Request, req: FlashLoanRequest, user: dict = Depends(get_current_user)):
+    """Execute a flash loan. Requires FLASH_LOAN_ENABLED=true."""
+    engine = get_flash_loan_engine()
+    if not engine.ready():
+        raise HTTPException(503, "Flash loan engine not ready. Set FLASH_LOAN_ENABLED=true and configure OPERATOR_KEY.")
+
+    strategy = FlashLoanStrategy(req.strategy)
+
+    if strategy == FlashLoanStrategy.SELF_LIQUIDATION:
+        if not req.position_id:
+            raise HTTPException(400, "position_id required for self_liquidation")
+        # Get position data from vault/HL
+        result = engine.execute_self_liquidation(
+            user_address=user["address"],
+            position_id=req.position_id,
+            margin_usd=req.amount_usd,
+            pnl_usd=0,  # TODO: fetch from HL position data
+            close_fee_usd=req.amount_usd * 0.1,  # estimate
+            profit_fee_usd=0,
+            coin="ETH",  # TODO: from position
+            is_long=True,  # TODO: from position
+        )
+    elif strategy == FlashLoanStrategy.LEVERAGE_LOOP:
+        if not req.deposit_usd or not req.leverage:
+            raise HTTPException(400, "deposit_usd and leverage required for leverage_loop")
+        result = engine.execute_leverage_loop(
+            user_address=user["address"],
+            deposit_usd=req.deposit_usd,
+            leverage_multiplier=req.leverage,
+        )
+    elif strategy == FlashLoanStrategy.ARBITRAGE:
+        result = engine.execute_flash_loan(
+            strategy=strategy,
+            asset=req.asset,
+            amount_usd=req.amount_usd,
+        )
+    else:
+        raise HTTPException(400, f"Unknown strategy: {req.strategy}")
+
+    return {
+        "strategy": result.strategy.value,
+        "status": result.status.value,
+        "amount_borrowed": float(result.amount_borrowed),
+        "aave_fee_usd": result.aave_fee_usd,
+        "lever_fee_usd": result.lever_fee_usd,
+        "total_fee_usd": result.total_fee_usd,
+        "treasury_fee_usd": result.treasury_fee_usd,
+        "net_profit_usd": result.net_profit_usd,
+        "tx_hash": result.tx_hash,
+        "block_number": result.block_number,
+        "gas_used": result.gas_used,
+        "error": result.error,
+    }
+
+
+@app.get("/api/flash-loan/history")
+async def flash_loan_history(limit: int = 20, user: dict = Depends(get_current_user)):
+    """Get recent flash loan execution history."""
+    engine = get_flash_loan_engine()
+    return {"history": engine.get_history(limit=limit)}
+
+
+# ─── Arbitrage Scanner ──────────────────────────────────────────────────────
+
+class ArbScanRequest(BaseModel):
+    token: str = Field(default="WETH", description="Token symbol to scan")
+    amount_usd: float = Field(ge=100, le=500_000, default=10000)
+    min_spread_bps: float = Field(default=100, description="Min spread in bps to report")
+
+
+@app.post("/api/flash-loan/scan")
+async def scan_arbitrage(req: ArbScanRequest, user: dict = Depends(get_current_user)):
+    """Scan for arbitrage opportunities for a token across DEXs."""
+    oracle = get_price_oracle()
+    opportunities = await oracle.find_arbitrage(
+        token=req.token,
+        amount_usd=req.amount_usd,
+        min_spread_bps=req.min_spread_bps,
+    )
+    return {
+        "token": req.token,
+        "amount_usd": req.amount_usd,
+        "opportunities": [
+            {
+                "token": opp.token,
+                "buy_dex": opp.buy_dex,
+                "sell_dex": opp.sell_dex,
+                "buy_price": opp.buy_price,
+                "sell_price": opp.sell_price,
+                "spread_bps": round(opp.spread_bps, 2),
+                "spread_usd": round(opp.spread_usd, 4),
+                "estimated_profit_usd": round(opp.estimated_profit_usd, 4),
+                "buy_route": opp.buy_route,
+                "sell_route": opp.sell_route,
+                "profitable": opp.profitable,
+            }
+            for opp in opportunities
+        ],
+        "count": len(opportunities),
+    }
+
+
+@app.get("/api/flash-loan/prices/{token}")
+async def get_token_prices(token: str, amount: float = 1000.0, user: dict = Depends(get_current_user)):
+    """Get current prices for a token across all DEXs on Arbitrum."""
+    oracle = get_price_oracle()
+    quotes = await oracle.get_prices("USDC", token, amount)
+    return {
+        "pair": f"USDC/{token.upper()}",
+        "amount_usd": amount,
+        "prices": {
+            dex: {
+                "price": q.price,
+                "amount_out": q.amount_out,
+                "route": q.route,
+                "confidence": q.confidence,
+            }
+            for dex, q in quotes.items()
+        },
+    }
+
+
+@app.get("/api/flash-loan/fee-tiers")
+async def get_flash_loan_fee_tiers():
+    """Show all flash loan fee tiers."""
+    from .flash_loan import FLASH_LOAN_FEE_TIERS, LEVER_FLASH_LOAN_FEE_BPS, AAVE_FLASH_LOAN_FEE_BPS
+    tiers = {}
+    for name, info in FLASH_LOAN_FEE_TIERS.items():
+        total_bps = info["lever_bps"] + AAVE_FLASH_LOAN_FEE_BPS
+        tiers[name] = {
+            **info,
+            "aave_bps": AAVE_FLASH_LOAN_FEE_BPS,
+            "total_bps": total_bps,
+            "total_pct": f"{total_bps / 100:.2f}%",
+            "example_10k": {
+                "aave_fee": f"${10000 * AAVE_FLASH_LOAN_FEE_BPS / 10000:.2f}",
+                "lever_fee": f"${10000 * info['lever_bps'] / 10000:.2f}",
+                "total_fee": f"${10000 * total_bps / 10000:.2f}",
+            },
+        }
+    return tiers
+
+
+@app.post("/api/flash-loan/simulate")
+async def simulate_flash_loan(
+    strategy: str = "arbitrage",
+    amount_usd: float = 10000.0,
+    token: str = "WETH",
+    user: dict = Depends(get_current_user),
+):
+    """Simulate a flash loan without actually executing it.
+    
+    Shows you what WOULD happen: fees, expected profit, gas cost.
+    Does NOT submit any transaction.
+    """
+    engine = get_flash_loan_engine()
+    oracle = get_price_oracle()
+    tier = user.get("fee_tier", "free")
+    
+    fees = engine.calculate_fee(amount_usd, tier)
+    
+    if strategy == "arbitrage":
+        # Find real arb opportunities
+        opportunities = await oracle.find_arbitrage(token, amount_usd)
+        best = opportunities[0] if opportunities else None
+        
+        gross_profit = best.estimated_profit_usd + fees["total_fee_usd"] if best else 0
+        profit_breakdown = engine.calculate_profit(amount_usd, gross_profit, tier)
+        
+        return {
+            "strategy": "arbitrage",
+            "token": token,
+            "amount_usd": amount_usd,
+            "fee_tier": tier,
+            **fees,
+            **profit_breakdown,
+            "best_opportunity": {
+                "buy_dex": best.buy_dex,
+                "sell_dex": best.sell_dex,
+                "spread_bps": round(best.spread_bps, 2),
+                "spread_usd": round(best.spread_usd, 4),
+            } if best else None,
+            "note": "Simulation only. No transaction submitted.",
+        }
+    elif strategy == "leverage_loop":
+        # Simulate a leverage loop
+        leverage = 5.0  # default 5x
+        borrow = amount_usd * (leverage - 1)
+        fees = engine.calculate_fee(borrow, tier)
+        
+        return {
+            "strategy": "leverage_loop",
+            "deposit_usd": amount_usd,
+            "leverage": leverage,
+            "borrow_usd": borrow,
+            "position_usd": amount_usd * leverage,
+            "fee_tier": tier,
+            **fees,
+            "note": f"Deposit ${amount_usd}, borrow ${borrow:.0f} from Aave, open ${amount_usd * leverage:.0f} position. Simulation only.",
+        }
+    elif strategy == "self_liquidation":
+        # Simulate self-liquidation cost comparison
+        margin = amount_usd
+        hl_liquidation_penalty = margin * 0.05  # ~5% typical HL penalty
+        fees = engine.calculate_fee(margin, tier)
+        
+        return {
+            "strategy": "self_liquidation",
+            "margin_usd": margin,
+            "fee_tier": tier,
+            **fees,
+            "hl_liquidation_penalty_usd": round(hl_liquidation_penalty, 2),
+            "savings_vs_liquidation": round(hl_liquidation_penalty - fees["total_fee_usd"], 2),
+            "cheaper_than_liquidation": fees["total_fee_usd"] < hl_liquidation_penalty,
+            "note": f"Flash loan costs ${fees['total_fee_usd']:.2f} vs liquidation penalty ${hl_liquidation_penalty:.2f}. Simulation only.",
+        }
+    else:
+        raise HTTPException(400, f"Unknown strategy: {strategy}")
 
 
 # ─── Health ──────────────────────────────────────────────────────────────────

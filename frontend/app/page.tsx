@@ -1,123 +1,195 @@
 "use client";
 
-import WalletPanel from "@/components/WalletPanel";
+import { useState, useEffect, useCallback } from "react";
 import WalletBar from "@/components/WalletBar";
 import TradePanel from "@/components/TradePanel";
-import PositionsPanel from "@/components/PositionsPanel";
-import MarketTicker from "@/components/MarketTicker";
+import FlashLoanPanel from "@/components/FlashLoanPanel";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import OrderBook from "@/components/OrderBook";
-import FundingRate from "@/components/FundingRate";
-import MemeCoinSelector from "@/components/MemeCoinSelector";
-import NFTBenefits from "@/components/NFTBenefits";
 import PriceChart from "@/components/PriceChart";
-import InfoStrip from "@/components/InfoStrip";
-import { useEffect, useState } from "react";
-import { getAllMids, getMeta, type PerpMarket } from "@/lib/hyperliquid";
+import FundingRate from "@/components/FundingRate";
+import PositionsPanel from "@/components/PositionsPanel";
+import { getAllMids } from "@/lib/hyperliquid";
 
 export default function Page() {
-  const [mids, setMids] = useState<Record<string, string>>({});
-  const [markets, setMarkets] = useState<PerpMarket[]>([]);
+  const [tab, setTab] = useState<"perps" | "flash">("perps");
   const [selectedCoin, setSelectedCoin] = useState("PURR");
-  const [showNFT, setShowNFT] = useState(false);
+  const [mids, setMids] = useState<Record<string, string>>({});
 
+  // Fetch mid prices
   useEffect(() => {
     let alive = true;
-    (async () => {
+    async function fetchMids() {
       try {
-        const m = await getAllMids(false);
-        if (alive) setMids(m);
+        const data = await getAllMids(false);
+        if (alive) setMids(data);
       } catch {}
-    })();
-    const iv = setInterval(async () => {
-      try {
-        const m = await getAllMids(false);
-        if (alive) setMids(m);
-      } catch {}
-    }, 15_000);
+    }
+    fetchMids();
+    const iv = setInterval(fetchMids, 10_000);
     return () => { alive = false; clearInterval(iv); };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const meta = await getMeta(false);
-        if (alive) setMarkets(meta.universe);
-      } catch {}
-    })();
-    return () => { alive = false; };
   }, []);
 
   return (
     <div className="min-h-screen hero-gradient flex flex-col">
-      <MarketTicker mids={mids} />
-
       {/* Header */}
       <header className="border-b border-white/5">
-        <div className="mx-auto max-w-[1600px] flex items-center justify-between px-4 py-3">
+        <div className="mx-auto max-w-[1100px] flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl md:text-3xl font-black tracking-tight">
+            <h1 className="text-2xl font-black tracking-tight">
               Lever<span className="text-bull">.</span>
             </h1>
+          </div>
+          <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-bull pulse-dot" />
               <span className="text-[10px] uppercase tracking-widest text-bull">Live</span>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowNFT(!showNFT)}
-              className="text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all"
-            >
-              NFT
-            </button>
             <WalletBar />
           </div>
         </div>
       </header>
 
-      {/* Main content — 3-column layout */}
-      <main className="mx-auto max-w-[1600px] w-full px-4 py-4 grid grid-cols-1 lg:grid-cols-[260px_1fr_300px] gap-4 flex-1 items-start">
-        {/* Left: Markets */}
-        <div className="lg:sticky lg:top-4">
-          <MemeCoinSelector
-            selected={selectedCoin}
-            onSelect={setSelectedCoin}
-            mids={mids}
-          />
+      {/* Tab Bar */}
+      <div className="mx-auto max-w-[1100px] w-full px-4 pt-4">
+        <div className="flex gap-1 p-1 bg-white/[0.03] rounded-xl border border-white/[0.06]">
+          <button
+            onClick={() => setTab("perps")}
+            className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 ${
+              tab === "perps"
+                ? "bg-bull/15 text-bull border border-bull/30"
+                : "text-muted hover:text-white hover:bg-white/5 border border-transparent"
+            }`}
+          >
+            ⚡ Perps
+          </button>
+          <button
+            onClick={() => setTab("flash")}
+            className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 ${
+              tab === "flash"
+                ? "bg-purple-500/15 text-purple-400 border border-purple-500/30"
+                : "text-muted hover:text-white hover:bg-white/5 border border-transparent"
+            }`}
+          >
+            🔄 Flash Loans
+          </button>
         </div>
+      </div>
 
-        {/* Center: Chart + Trade + Positions */}
-        <div className="space-y-4">
-          <InfoStrip />
-          <PriceChart coin={selectedCoin} />
-          <TradePanel
-            mids={mids}
-            selectedCoin={selectedCoin}
-            onCoinChange={setSelectedCoin}
-          />
-          <WalletPanel />
-          <PositionsPanel />
-          {showNFT && <NFTBenefits />}
-        </div>
+      {/* Content */}
+      <main className="mx-auto max-w-[1100px] w-full px-4 py-4 flex-1">
+        {tab === "perps" ? (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            {/* Left column: Coin selector + Trade + Order Book */}
+            <div className="lg:col-span-4 space-y-4">
+              {/* Coin Selector */}
+              <div className="glass rounded-2xl p-4">
+                <CoinSelector selected={selectedCoin} onSelect={setSelectedCoin} mids={mids} />
+              </div>
 
-        {/* Right: OrderBook + Funding */}
-        <div className="space-y-4">
-          <OrderBook
-            coin={selectedCoin}
-            midPrice={mids[selectedCoin]}
-          />
-          <FundingRate coin={selectedCoin} />
-        </div>
+              {/* Trade Panel */}
+              <div className="glass rounded-2xl p-5">
+                <ErrorBoundary name="Trade">
+                  <TradePanel mids={mids} selectedCoin={selectedCoin} onCoinChange={setSelectedCoin} />
+                </ErrorBoundary>
+              </div>
+            </div>
+
+            {/* Center: Chart + Order Book */}
+            <div className="lg:col-span-5 space-y-4">
+              <ErrorBoundary name="Chart">
+                <PriceChart coin={selectedCoin} />
+              </ErrorBoundary>
+              <ErrorBoundary name="OrderBook">
+                <OrderBook coin={selectedCoin} midPrice={mids[selectedCoin]} />
+              </ErrorBoundary>
+            </div>
+
+            {/* Right column: Funding + Positions */}
+            <div className="lg:col-span-3 space-y-4">
+              <ErrorBoundary name="Funding">
+                <FundingRate coin={selectedCoin} />
+              </ErrorBoundary>
+              <ErrorBoundary name="Positions">
+                <PositionsPanel />
+              </ErrorBoundary>
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-[680px]">
+            <div className="glass rounded-2xl p-5">
+              <ErrorBoundary name="Flash Loan">
+                <FlashLoanPanel />
+              </ErrorBoundary>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-white/5">
-        <div className="mx-auto max-w-[1600px] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-          <span>Open+Close: 0.10% · Profit fee: 10% of gains · Withdrawals: FREE · Not financial advice</span>
+        <div className="mx-auto max-w-[1100px] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+          <span>Perps: 0.10% open+close · Profit: 10% of gains · Flash loans: 0.55% total</span>
           <span>Lever Protocol</span>
         </div>
       </footer>
+    </div>
+  );
+}
+
+// ─── Inline Coin Selector ────────────────────────────────────────────────
+
+const MEMECOIN_PERPS = [
+  "PURR", "MOON", "JEFF", "HLN", "RAGE", "BALD", "SPX", "TRUMP",
+  "WIF", "POPE", "GIGA", "BRETT", "MOG", "PEPE", "FLOKI", "BONK",
+];
+
+function CoinSelector({ selected, onSelect, mids }: { selected: string; onSelect: (c: string) => void; mids: Record<string, string> }) {
+  const [search, setSearch] = useState("");
+
+  const filtered = MEMECOIN_PERPS.filter(c =>
+    c.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-bold">Asset</h2>
+        <span className="text-[10px] text-muted">{filtered.length} markets</span>
+      </div>
+
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search..."
+        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs font-mono mb-2 focus:outline-none focus:border-bull/50 placeholder:text-muted/50"
+      />
+
+      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+        {filtered.map(name => {
+          const mid = mids[name];
+          const midNum = mid ? parseFloat(mid) : 0;
+          return (
+            <button
+              key={name}
+              onClick={() => { onSelect(name); setSearch(""); }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all ${
+                selected === name
+                  ? "bg-bull/15 text-bull border border-bull/30"
+                  : "bg-white/[0.03] text-muted border border-white/5 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <span className="font-bold">{name}</span>
+              {midNum > 0 && (
+                <span className="ml-1 text-[10px] opacity-60">
+                  ${midNum >= 1 ? midNum.toFixed(2) : midNum < 0.001 ? midNum.toExponential(1) : midNum.toPrecision(3)}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

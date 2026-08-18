@@ -9,11 +9,11 @@
  * - Fee info + preview
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://tbb-site.onrender.com";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://142.93.249.246";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type FeeTier = "free" | "iron" | "silver" | "gold" | "diamond";
+export type FeeTier = "iron" | "silver" | "gold" | "diamond";
 
 export type AuthChallenge = {
   message: string;
@@ -278,7 +278,7 @@ export async function previewFees(
   notionalUsd: number,
   marginUsd: number,
   estimatedPnlUsd: number = 0,
-  tier: FeeTier = "free"
+  tier: FeeTier = "iron"
 ): Promise<FeePreview> {
   return apiFetch("/api/fees/preview", {
     method: "POST",

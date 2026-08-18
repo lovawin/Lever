@@ -2,24 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAccount, useWalletClient } from "wagmi";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { Connection } from "@solana/web3.js";
 import { placeMarketOrder, getMeta, type PerpMarket } from "@/lib/hyperliquid";
-import {
-  searchTokens,
-  type TokenSearchResult,
-  calculateLeverageMetrics,
-  openLeveragePosition,
-  getSolPrice,
-  SOL_MINT,
-  USDC_MINT,
-  LAVARAGE_API_KEY,
-} from "@/lib/leverage";
 import { calculateTradeFees, formatUsd, type FeeTier } from "@/lib/fees";
-
-/** All perp coins are loaded dynamically from the API */
-
-type TradeMode = "perps" | "spot";
 
 type TradePanelProps = {
   mids: Record<string, string>;
@@ -30,31 +14,23 @@ type TradePanelProps = {
 export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoinChange }: TradePanelProps) {
   const { address, isConnected: evmConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const { publicKey, connected: solConnected, signTransaction, sendTransaction } = useWallet();
 
   const [markets, setMarkets] = useState<PerpMarket[]>([]);
-  // Auto-detect mode based on coin — if it's in HL_PERP_MEMECOINS, use perps
-  const [mode, setMode] = useState<TradeMode>("perps");
-  const [internalCoin, setInternalCoin] = useState("PURR");
-  const coin = selectedCoinProp ?? internalCoin;
-  const setCoin = onCoinChange ?? setInternalCoin;
+  const coin = selectedCoinProp ?? "PURR";
+  const setCoin = (c: string) => { if (onCoinChange) onCoinChange(c); };
   const [side, setSide] = useState<"long" | "short">("long");
   const [sizeUsd, setSizeUsd] = useState(25);
   const [leverage, setLeverage] = useState(2);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [feeTier] = useState<FeeTier>('free'); // TODO: detect from NFT holdings
-  const [tokenQuery, setTokenQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<TokenSearchResult[]>([]);
-  const [selectedToken, setSelectedToken] = useState<TokenSearchResult | null>(null);
-  const [searching, setSearching] = useState(false);
+  const [feeTier] = useState<FeeTier>("iron");
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const meta = await getMeta(false); // mainnet for real market data
+        const meta = await getMeta(false);
         if (alive) setMarkets(meta.universe);
       } catch {}
     })();
@@ -64,7 +40,8 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
   const market = markets.find((m) => m.name === coin);
   const mid = mids[coin];
   const midNum = mid ? parseFloat(mid) : 0;
-  const levCapped = mode === "perps" && market ? Math.min(leverage, market.maxLeverage) : leverage;
+  const maxLev = market?.maxLeverage ?? 20;
+  const levCapped = Math.min(leverage, maxLev);
   const notional = sizeUsd * levCapped;
   const estLiquidation = midNum > 0 && levCapped > 0
     ? side === "long"
@@ -72,170 +49,61 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
       : midNum * (1 + 1 / levCapped)
     : 0;
 
-  // Spot mode: no shorts, limited leverage
-  const canShort = mode === "perps";
-  const maxLev = mode === "perps" ? (market?.maxLeverage ?? 20) : 5;
-  const metrics = mode === "spot" ? calculateLeverageMetrics(sizeUsd, levCapped) : null;
-
-  // Token search for spot mode
-  useEffect(() => {
-    if (mode !== "spot" || tokenQuery.length < 2) { setSearchResults([]); return; }
-    let alive = true;
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const results = await searchTokens(tokenQuery);
-        if (alive) setSearchResults(results);
-      } catch { /* ignore */ }
-      finally { if (alive) setSearching(false); }
-    }, 300);
-    return () => { alive = false; clearTimeout(timer); };
-  }, [mode, tokenQuery]);
-
   const submit = useCallback(async () => {
     setBusy(true);
     setErr(null);
     setResult(null);
 
     try {
-      if (mode === "perps") {
-        // ─── Perps ────────────────────────────────────────────────────
-        if (!evmConnected || !address || !walletClient) {
-          throw new Error("Connect an EVM wallet (MetaMask/Rabby) for perps");
-        }
+      if (!evmConnected || !address || !walletClient) {
+        throw new Error("Connect an EVM wallet (MetaMask/Rabby)");
+      }
 
-        const r = await placeMarketOrder({
-          coin,
-          isLong: side === "long",
-          sizeUsd,
-          address,
-          walletClient,
-          testnet: false,
-          leverage: levCapped,
-        });
+      const r = await placeMarketOrder({
+        coin,
+        isLong: side === "long",
+        sizeUsd,
+        address,
+        walletClient,
+        testnet: false,
+        leverage: levCapped,
+      });
 
-        // Format result for display
-        const status = r.response?.data?.statuses?.[0];
-        if (status?.error) {
-          throw new Error(status.error);
-        }
-        const filled = status?.filled;
-        const resting = status?.resting;
-        if (filled) {
-          setResult(`✅ Filled: ${filled.totalSz} @ $${filled.avgPx} (oid: ${filled.oid})`);
-        } else if (resting) {
-          setResult(`Resting order placed (oid: ${resting.oid})`);
-        } else {
-          setResult(`✅ Order sent: ${JSON.stringify(r).slice(0, 300)}`);
-        }
+      const status = r.response?.data?.statuses?.[0];
+      if (status?.error) throw new Error(status.error);
+
+      const filled = status?.filled;
+      const resting = status?.resting;
+      if (filled) {
+        setResult(`✅ Filled: ${filled.totalSz} @ $${filled.avgPx}`);
+      } else if (resting) {
+        setResult(`📋 Order placed (oid: ${resting.oid})`);
       } else {
-        // ─── Spot Leverage ────────────────────────────────────────────────
-        if (!solConnected || !publicKey) {
-          throw new Error("Connect a Solana wallet (Phantom/Solflare) for spot leverage");
-        }
-        if (!selectedToken) {
-          throw new Error("Select a token to long");
-        }
-
-        const connection = new Connection(
-          process.env.NEXT_PUBLIC_SOL_RPC ?? "https://api.mainnet-beta.solana.com",
-          "confirmed"
-        );
-
-        // Get a wallet adapter that supports signTransaction
-        const walletAdapter = (window as any).solana;
-        if (!walletAdapter?.signTransaction) {
-          throw new Error("Wallet does not support transaction signing. Use Phantom or Solflare.");
-        }
-
-        // Get SOL price — try live mids first, then DexScreener fallback
-        let solPrice: number;
-        const midSol = mids["SOL"] ?? mids["sOL"];
-        if (midSol && parseFloat(midSol) > 0) {
-          solPrice = parseFloat(midSol);
-        } else {
-          try {
-            solPrice = await getSolPrice();
-          } catch {
-            solPrice = 175; // hardcoded fallback
-          }
-        }
-        const collateralSol = sizeUsd / solPrice;
-
-        const { signatures, steps } = await openLeveragePosition({
-          walletAddress: publicKey.toBase58(),
-          walletAdapter,
-          connection,
-          collateralSol,
-          leverage: levCapped,
-          targetMint: selectedToken.mint,
-          slippagePercent: 1,
-          solPrice,
-        });
-
-        setResult(
-          `✅ Spot leverage opened!\n${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\nTX: ${signatures.join(", ")}`
-        );
+        setResult(`✅ Order sent`);
       }
     } catch (e: any) {
-      const msg = e?.shortMessage ?? e?.message ?? String(e);
-      // Include partial progress if available
-      const steps = e?.steps;
-      if (steps?.length) {
-        setErr(`${msg}\n\nProgress:\n${steps.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
-      } else {
-        setErr(msg);
-      }
+      setErr(e?.shortMessage ?? e?.message ?? String(e));
     } finally {
       setBusy(false);
     }
-  }, [mode, coin, side, sizeUsd, levCapped, address, walletClient, evmConnected, solConnected, publicKey, selectedToken]);
+  }, [coin, side, sizeUsd, levCapped, address, walletClient, evmConnected]);
 
   return (
-    <div className="glass rounded-2xl p-4">
+    <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold">Trade</h2>
-        <div className="flex items-center gap-2">
+        <h2 className="text-lg font-bold">⚡ Memecoin Perps</h2>
+        <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-bull pulse-dot" />
           <span className="text-[10px] uppercase tracking-widest text-bull">Live</span>
         </div>
       </div>
 
-      {/* Mode toggle: Perps vs Spot */}
-      <div className="grid grid-cols-2 gap-2 mb-5">
-        <button
-          onClick={() => { setMode("perps"); setCoin("PURR"); }}
-          className={`py-2.5 rounded-xl font-bold text-xs tracking-wide transition-all duration-200 border ${
-            mode === "perps"
-              ? "bg-white/10 border-white/20 text-white"
-              : "bg-white/[0.03] border-white/5 text-muted hover:text-white hover:bg-white/5"
-          }`}
-        >
-          Perps
-        </button>
-        <button
-          onClick={() => { setMode("spot"); setSide("long"); }}
-          className={`py-2.5 rounded-xl font-bold text-xs tracking-wide transition-all duration-200 border ${
-            mode === "spot"
-              ? "bg-white/10 border-white/20 text-white"
-              : "bg-white/[0.03] border-white/5 text-muted hover:text-white hover:bg-white/5"
-          }`}
-        >
-          Spot Leverage
-        </button>
-      </div>
+      <p className="text-[11px] text-white/50 mb-4 leading-relaxed">
+        Long &amp; short memecoin perpetuals with leverage. Powered by Hyperliquid.
+      </p>
 
-      {/* Mode description */}
-      <div className="text-[10px] text-muted mb-5 px-1 leading-relaxed">
-        {mode === "perps" ? (
-          <>Perpetual contracts. Long &amp; short with up to {market?.maxLeverage ?? 20}x leverage. EVM wallet.</>
-        ) : (
-                    <>Leveraged long on any Solana token. Tries Lavarage (any token) → Kamino (SOL only) → spot swap (1x). Solana wallet required.</>
-        )}
-      </div>
-
-      {/* Side toggle (long/short) — short disabled in spot mode */}
+      {/* Side toggle */}
       <div className="grid grid-cols-2 gap-2 mb-5">
         <button
           onClick={() => setSide("long")}
@@ -248,102 +116,35 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
           ▲ LONG
         </button>
         <button
-          onClick={() => canShort && setSide("short")}
-          disabled={!canShort}
+          onClick={() => setSide("short")}
           className={`py-3 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 ${
-            !canShort
-              ? "bg-white/5 text-muted/40 cursor-not-allowed"
-              : side === "short"
-                ? "bg-bear text-white shadow-lg shadow-bear/25"
-                : "bg-white/5 text-muted hover:text-white hover:bg-white/10"
+            side === "short"
+              ? "bg-bear text-white shadow-lg shadow-bear/25"
+              : "bg-white/5 text-muted hover:text-white hover:bg-white/10"
           }`}
         >
-          ▼ SHORT {!canShort && <span className="text-[10px]">(perps only)</span>}
+          ▼ SHORT
         </button>
       </div>
 
-      {/* Coin display */}
-      {mode === "perps" ? (
-        <>
-          <label className="block text-[10px] uppercase tracking-widest text-muted mb-1.5">Asset</label>
-          <div className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-1 font-mono text-sm flex items-center justify-between">
-            <span className="font-bold">{coin}</span>
-            {market && <span className="text-muted text-xs">up to {market.maxLeverage}x</span>}
-          </div>
-          {mid && (
-            <div className="text-xs text-bull font-mono mb-4 mt-1">
-              ${midNum >= 1 ? midNum.toFixed(2) : midNum.toPrecision(4)}
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          <label className="block text-[10px] uppercase tracking-widest text-muted mb-1.5">Token</label>
-          <div className="relative">
-            <input
-              type="text"
-              value={tokenQuery}
-              onChange={(e) => { setTokenQuery(e.target.value); setSelectedToken(null); }}
-              placeholder="Search by name, symbol, or paste mint address…"
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-bull/50 placeholder:text-muted/50"
-            />
-            {searching && (
-              <div className="absolute right-3 top-3.5 text-xs text-muted animate-pulse">Searching…</div>
-            )}
-          </div>
-          {/* Search results dropdown */}
-          {searchResults.length > 0 && !selectedToken && (
-            <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-panel shadow-xl">
-              {searchResults.map((t) => (
-                <button
-                  key={t.mint}
-                  onClick={() => { setSelectedToken(t); setTokenQuery(`${t.symbol} — ${t.name}`); }}
-                  className="w-full text-left px-4 py-2.5 hover:bg-white/5 flex items-center gap-3 border-b border-white/5 last:border-0"
-                >
-                  {t.logoUri && <img src={t.logoUri} alt="" className="w-5 h-5 rounded-full" />}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-bold truncate">{t.symbol}</div>
-                    <div className="text-[10px] text-muted truncate">{t.name}</div>
-                  </div>
-                  <div className="text-right text-[10px]">
-                    {t.priceUsd != null && <div className="text-bull font-mono">${t.priceUsd < 0.01 ? t.priceUsd.toPrecision(3) : t.priceUsd.toFixed(2)}</div>}
-                    {t.volume24h != null && <div className="text-muted">Vol: ${(t.volume24h / 1e6).toFixed(1)}M</div>}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-          {/* Selected token badge */}
-          {selectedToken && (
-            <div className="mt-2 flex items-center gap-2 bg-bull/10 border border-bull/20 rounded-lg px-3 py-2">
-              {selectedToken.logoUri && <img src={selectedToken.logoUri} alt="" className="w-4 h-4 rounded-full" />}
-              <span className="text-sm font-bold">{selectedToken.symbol}</span>
-              <span className="text-[10px] text-muted">{selectedToken.name}</span>
-              {selectedToken.priceUsd != null && (
-                <span className="text-[10px] text-bull font-mono ml-auto">${selectedToken.priceUsd < 0.01 ? selectedToken.priceUsd.toPrecision(3) : selectedToken.priceUsd.toFixed(2)}</span>
-              )}
-              <button onClick={() => { setSelectedToken(null); setTokenQuery(""); }} className="text-muted hover:text-white ml-1">✕</button>
-            </div>
-          )}
-        {mode === "spot" && selectedToken && selectedToken.mint !== SOL_MINT && leverage > 1 && !LAVARAGE_API_KEY && (
-          <div className="text-[10px] text-bear bg-bear/10 border border-bear/20 rounded-lg px-3 py-2 mb-3">
-            ⚠ Leverage on memecoins requires a Lavarage API key (pending approval). Falling back to 1x spot swap.
-          </div>
-        )}
-        </>
+      {/* Coin selected via parent CoinSelector */}
+
+      {/* Price */}
+      {mid && (
+        <div className="text-sm text-bull font-mono mb-3">
+          ${midNum >= 1 ? midNum.toFixed(2) : midNum < 0.001 ? midNum.toExponential(2) : midNum.toPrecision(4)}
+        </div>
       )}
 
       {/* Size */}
-      <label className="block text-[10px] uppercase tracking-widest text-muted mb-1.5">
-        {mode === "perps" ? "Margin (USD)" : "Collateral (USD)"}
-      </label>
+      <label className="block text-[10px] uppercase tracking-widest text-muted mb-1.5">Margin (USD)</label>
       <input
         type="number"
         min={10}
         step={5}
         value={sizeUsd}
         onChange={(e) => setSizeUsd(Math.max(10, Number(e.target.value) || 0))}
-        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-5 font-mono text-sm focus:outline-none focus:border-bull/50"
+        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-4 font-mono text-sm focus:outline-none focus:border-bull/50"
       />
 
       {/* Leverage */}
@@ -365,33 +166,28 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
       </div>
 
       {/* Order summary */}
-      <div className="bg-white/5 rounded-xl p-4 mb-5 text-xs font-mono space-y-2">
+      <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 mb-5 text-xs font-mono space-y-2">
         <div className="flex justify-between">
-          <span className="text-muted">{mode === "perps" ? "Notional" : "Position size"}</span>
+          <span className="text-muted">Notional</span>
           <span>${notional.toFixed(2)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-muted">{mode === "perps" ? "Margin" : "Collateral"}</span>
+          <span className="text-muted">Margin</span>
           <span>${sizeUsd.toFixed(2)}</span>
         </div>
-        {/* Fee breakdown */}
         {(() => {
           const fees = calculateTradeFees(notional, sizeUsd, feeTier, 0, false, 0);
           return (
             <>
-              <div className="border-t border-white/5 pt-2 mt-1" />
+              <div className="border-t border-white/5 pt-2" />
               {fees.breakdown.map((item, i) => (
-                <div key={i} className={`flex justify-between ${i === 3 ? "border-t border-white/5 pt-2" : ""}`}>
-                  <span className={item.label === 'Withdrawal' || item.label === 'Profit fee' ? 'text-muted text-[11px]' : 'text-muted text-[11px]'}>
+                <div key={i} className="flex justify-between">
+                  <span className="text-muted text-[11px]">
                     {item.label}
-                    {item.label === 'Profit fee' && <span className="text-muted/60"> (winning trades only)</span>}
+                    {item.label === "Profit fee" && <span className="text-white/30"> (wins only)</span>}
                   </span>
-                  <span className={
-                    item.amount === 0 && item.rate === 'FREE' 
-                      ? 'text-bull text-[11px]' 
-                      : 'text-[11px]'
-                  }>
-                    {item.rate === 'FREE' 
+                  <span className="text-[11px]">
+                    {item.rate === "FREE"
                       ? <span className="text-bull">FREE</span>
                       : <>{item.rate} · {formatUsd(item.amount)}</>
                     }
@@ -402,21 +198,9 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
           );
         })()}
         {estLiquidation > 0 && (
-          <div className="flex justify-between">
+          <div className="flex justify-between border-t border-white/5 pt-2">
             <span className="text-muted">Est. liq price</span>
             <span className="text-bear">${estLiquidation.toFixed(2)}</span>
-          </div>
-        )}
-        {mode === "spot" && metrics && leverage > 1 && (
-          <div className="flex justify-between text-bull">
-            <span>Borrow</span>
-            <span>${metrics.borrowUsd.toFixed(2)}</span>
-          </div>
-        )}
-        {mode === "spot" && metrics && leverage > 1 && (
-          <div className="flex justify-between text-bear">
-            <span>Liquidation</span>
-            <span>−{metrics.liquidationDropPct.toFixed(1)}% drop</span>
           </div>
         )}
       </div>
@@ -431,17 +215,11 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
             : "bg-bear text-white hover:bg-bear/90 shadow-lg shadow-bear/20"
         } disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none`}
       >
-        {busy ? "Processing…" : mode === "perps"
-          ? `${side.toUpperCase()} ${coin} ${levCapped}x · $${sizeUsd}`
-          : selectedToken
-            ? `LONG ${selectedToken.symbol} ${levCapped}x · $${notional.toFixed(0)}`
-            : "Select a token to long"
-        }
+        {busy ? "Processing…" : `${side.toUpperCase()} ${coin} ${levCapped}x · $${sizeUsd}`}
       </button>
 
-      {/* Wallet hint */}
       <div className="mt-3 text-[10px] text-muted text-center">
-        {mode === "perps" ? "EVM wallet (MetaMask/Rabby) — perps on Hyperliquid" : "Solana wallet (Phantom) — Lavarage / Kamino / Jupiter"}
+        EVM wallet (MetaMask/Rabby) · Hyperliquid perps
       </div>
 
       {err && (

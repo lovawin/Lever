@@ -9,11 +9,10 @@
  * Withdrawals are always free (non-custodial).
  *
  * Tiers:
- *   Free (no NFT)      → 0.10% open/close, 10% profit
- *   Iron NFT (free)     → 0.09% open/close,  9% profit
- *   Silver NFT          → 0.075% open/close,  7.5% profit
- *   Gold NFT            → 0.05% open/close,   5% profit + 15% funding rebate
- *   Diamond NFT         → 0.00% open/close,   0% profit + 25% funding rebate + 25% revenue share
+ *   Iron NFT (0.03 ETH)  → 4.5% open/close,  9% profit
+ *   Silver NFT (0.6 ETH) → 3.75% open/close, 7.5% profit
+ *   Gold NFT (0.1 ETH)  → 2.5% open/close,   5% profit + 15% funding rebate
+ *   Diamond NFT (0.3 ETH) → 0% open/close,    0% profit + 25% funding rebate + 25% revenue share
  *
  * Funding rebates and revenue share are distributed from treasury to NFT holders
  * on a periodic basis (weekly).
@@ -21,7 +20,7 @@
 
 // ─── Fee Tier Definitions ──────────────────────────────────────────────────
 
-export type FeeTier = 'free' | 'iron' | 'silver' | 'gold' | 'diamond';
+export type FeeTier = 'iron' | 'silver' | 'gold' | 'diamond';
 
 export const FEE_TIERS: Record<FeeTier, {
   label: string;
@@ -33,55 +32,45 @@ export const FEE_TIERS: Record<FeeTier, {
   revenueShare: number;        // % of platform revenue shared with user
   mintPrice: string;
 }> = {
-  free: {
-    label: 'Free',
-    color: 'text-gray-400',
-    openCloseBps: 10,           // 0.10% on open, 0.10% on close
-    profitFeePct: 10,          // 10% of profits
-    feeDiscount: 0,
-    fundingRebate: 0,
-    revenueShare: 0,
-    mintPrice: 'Free',
-  },
   iron: {
     label: 'Iron',
     color: 'text-gray-300',
-    openCloseBps: 9,            // 0.09%
+    openCloseBps: 450,            // 4.5%
     profitFeePct: 9,
     feeDiscount: 10,
     fundingRebate: 0,
     revenueShare: 0,
-    mintPrice: 'Free (gas only)',
+    mintPrice: '0.03 ETH',
   },
   silver: {
     label: 'Silver',
     color: 'text-gray-200',
-    openCloseBps: 7.5,         // 0.075%
+    openCloseBps: 375,         // 3.75%
     profitFeePct: 7.5,
     feeDiscount: 25,
     fundingRebate: 0,
     revenueShare: 0,
-    mintPrice: '0.05 ETH',
+    mintPrice: '0.06 ETH',
   },
   gold: {
     label: 'Gold',
     color: 'text-yellow-400',
-    openCloseBps: 5,            // 0.05%
+    openCloseBps: 250,            // 2.5%
     profitFeePct: 5,
     feeDiscount: 50,
     fundingRebate: 15,
     revenueShare: 0,
-    mintPrice: '0.2 ETH',
+    mintPrice: '0.1 ETH',
   },
   diamond: {
     label: 'Diamond',
     color: 'text-cyan-400',
-    openCloseBps: 0,            // 0.00% — fee-free
+    openCloseBps: 0,            // 0% — fee-free
     profitFeePct: 0,            // no profit fee
     feeDiscount: 100,
     fundingRebate: 25,
     revenueShare: 25,
-    mintPrice: '1 ETH',
+    mintPrice: '0.3 ETH',
   },
 };
 
@@ -96,7 +85,7 @@ export const TREASURY_ADDRESS = (typeof process !== 'undefined' && process.env?.
  */
 export function calculateOpenFee(
   notionalUsd: number,
-  tier: FeeTier = 'free',
+  tier: FeeTier = 'iron',
 ): { feeUsd: number; feeBps: number } {
   const config = FEE_TIERS[tier];
   const feeUsd = notionalUsd * (config.openCloseBps / 10000);
@@ -109,7 +98,7 @@ export function calculateOpenFee(
  */
 export function calculateCloseFee(
   notionalUsd: number,
-  tier: FeeTier = 'free',
+  tier: FeeTier = 'iron',
 ): { feeUsd: number; feeBps: number } {
   // Same rate as open
   return calculateOpenFee(notionalUsd, tier);
@@ -122,7 +111,7 @@ export function calculateCloseFee(
  */
 export function calculateProfitFee(
   pnlUsd: number,
-  tier: FeeTier = 'free',
+  tier: FeeTier = 'iron',
 ): { feeUsd: number; feePct: number; applies: boolean } {
   if (pnlUsd <= 0) {
     return { feeUsd: 0, feePct: FEE_TIERS[tier].profitFeePct, applies: false };
@@ -139,7 +128,7 @@ export function calculateProfitFee(
 export function calculateTradeFees(
   notionalUsd: number,
   marginUsd: number,
-  tier: FeeTier = 'free',
+  tier: FeeTier = 'iron',
   estimatedPnlUsd: number = 0,
   isMaker: boolean = false,
   hlVolumeTier: number = 0,
@@ -158,7 +147,7 @@ export function calculateTradeFees(
   totalFees: number;
   totalBps: number;
   // Comparison
-  savingsVsFree: number;
+  savingsVsBase: number;
   // Withdrawal
   withdrawalFee: number;
   // Breakdown for display
@@ -191,11 +180,11 @@ export function calculateTradeFees(
   const totalBps = config.openCloseBps * 2 + venueBps; // approximate
 
   // Savings vs free tier
-  const freeConfig = FEE_TIERS['free'];
-  const freeOpen = notionalUsd * (freeConfig.openCloseBps / 10000);
-  const freeClose = freeOpen;
-  const freeProfit = estimatedPnlUsd > 0 ? estimatedPnlUsd * (freeConfig.profitFeePct / 100) : 0;
-  const savingsVsFree = (freeOpen + freeClose + freeProfit) - totalLeverFees;
+  const baseConfig = FEE_TIERS['iron'];
+  const baseOpen = notionalUsd * (baseConfig.openCloseBps / 10000);
+  const baseClose = baseOpen;
+  const baseProfit = estimatedPnlUsd > 0 ? estimatedPnlUsd * (baseConfig.profitFeePct / 100) : 0;
+  const savingsVsFree = (baseOpen + baseClose + baseProfit) - totalLeverFees;
 
   // Breakdown for display
   const breakdown = [
@@ -217,7 +206,7 @@ export function calculateTradeFees(
     venueBps,
     totalFees,
     totalBps,
-    savingsVsFree,
+    savingsVsBase,
     withdrawalFee: 0,
     breakdown,
   };
@@ -230,7 +219,7 @@ export function calculateTradeFees(
  * The builder fee is included in the order action as: { b: builderAddr, f: feeBps }
  * where f is in tenths of basis points (so 0.10% = 10).
  */
-export function leverFeeToHlBuilderCode(tier: FeeTier = 'free'): {
+export function leverFeeToHlBuilderCode(tier: FeeTier = 'iron'): {
   builderAddress: string;
   feeTenthsOfBps: number;
 } {
