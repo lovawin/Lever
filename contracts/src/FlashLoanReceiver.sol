@@ -252,8 +252,9 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
     // ─── Strategy Implementations ────────────────────────────────────────────
 
     /**
-     * @notice Arbitrage: borrow USDC → buy token on DEX → sell on DEX → repay.
-     * @param strategyParams Encoded: (buyToken, poolFee, minProfit)
+     * @notice Arbitrage: borrow USDC → buy token (low-fee pool) → sell (high-fee pool) → repay.
+     * @dev Uses two different fee tiers to capture price discrepancies between Uniswap V3 pools.
+     * @param strategyParams Encoded: (buyToken, buyPoolFee, sellPoolFee, minProfit)
      */
     function _executeArbitrage(
         address asset,
@@ -261,21 +262,17 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
         uint256 premium,
         bytes memory strategyParams
     ) internal returns (int256 profit) {
-        // Decode params
-        (address buyToken, uint24 poolFee, uint256 minProfit) =
-            abi.decode(strategyParams, (address, uint24, uint256));
+        (address buyToken, uint24 buyPoolFee, uint24 sellPoolFee, uint256 minProfit) =
+            abi.decode(strategyParams, (address, uint24, uint24, uint256));
 
-        // Step 1: Buy token with borrowed USDC
-        uint256 tokenBought = _swapExactInput(
-            asset, buyToken, poolFee, amount, 0
-        );
+        // Buy token with borrowed USDC (low-fee pool)
+        uint256 tokenBought = _swapExactInput(asset, buyToken, buyPoolFee, amount, 0);
 
-        // Step 2: Sell token back to USDC
+        // Sell token back to USDC (different-fee pool)
         uint256 usdcReceived = _swapExactInput(
-            buyToken, asset, poolFee, tokenBought, amount + premium + minProfit
+            buyToken, asset, sellPoolFee, tokenBought, amount + premium + minProfit
         );
 
-        // Calculate profit
         profit = int256(usdcReceived) - int256(amount + premium);
         require(profit >= int256(minProfit), "Insufficient profit");
     }

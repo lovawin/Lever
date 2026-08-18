@@ -29,7 +29,7 @@ const AAVE_V3_POOL_ARBITRUM = "0x794a61358D6845594F94dc1DB02A252b5b4814aD" as `0
 const USDC_ARBITRUM = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as `0x${string}`;
 
 // FlashLoanReceiver on Arbitrum
-const FLASH_LOAN_RECEIVER = "0x390dceee8ae15b0550ec7de5005f2d0f7a34fef4" as `0x${string}`;
+const FLASH_LOAN_RECEIVER = "0x469822c9f2941a816c313708b43f4de7917edb3c" as `0x${string}`;
 
 // ─── Strategy IDs ────────────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@ export function useFlashLoan(
       let params: `0x${string}`;
       if (strategy === "arbitrage") {
         const WETH_ARB = "0x82aF49447D8a07e3bd95BD0d56f35241523fB251" as `0x${string}`;
-        const inner = abiEncodeArbitrage(WETH_ARB, 500, 0n);
+        const inner = abiEncodeArbitrage(WETH_ARB, 500, 3000, 0n);
         params = `0x${strategyId.toString(16).padStart(2, "0")}${inner.slice(2)}` as `0x${string}`;
       } else if (strategy === "self_liquidation") {
         const closeFee = BigInt(Math.floor(safeAmount * 0.01 * 1e6));
@@ -174,12 +174,13 @@ export function useFlashLoan(
 
 // ─── ABI encoding helpers ─────────────────────────────────────────────────
 
-function abiEncodeArbitrage(buyToken: `0x${string}`, poolFee: number, minProfit: bigint): `0x${string}` {
+function abiEncodeArbitrage(buyToken: `0x${string}`, buyPoolFee: number, sellPoolFee: number, minProfit: bigint): `0x${string}` {
   const padded = (val: bigint, bytes: number) => val.toString(16).padStart(bytes * 2, "0");
   const addr = buyToken.toLowerCase().slice(2).padStart(64, "0");
-  const fee = padded(BigInt(poolFee), 4).padStart(64, "0");
+  const buyFee = padded(BigInt(buyPoolFee), 4).padStart(64, "0");
+  const sellFee = padded(BigInt(sellPoolFee), 4).padStart(64, "0");
   const profit = padded(minProfit, 32);
-  return `0x${addr}${fee}${profit}` as `0x${string}`;
+  return `0x${addr}${buyFee}${sellFee}${profit}` as `0x${string}`;
 }
 
 function abiEncodeSelfLiquidation(
