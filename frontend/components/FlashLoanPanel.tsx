@@ -74,7 +74,7 @@ const STRATEGY_META: Record<
     label: "Self-Liquidation",
     emoji: "🛡️",
     description:
-      "Borrow USDC to close your position before forced liquidation. Cheaper than the penalty — pay only 0.55% total (Aave + Lever fee).",
+      "Borrow USDC from Aave to close your LeverVault position before forced liquidation. Pay only 0.55% total vs 5% HL penalty.",
     color: "text-blue-400",
     bgColor: "bg-blue-500/10",
     borderColor: "border-blue-500/20",
@@ -165,7 +165,7 @@ function FlashLoanPanelInner() {
             (typeof STRATEGY_META)[FlashLoanStrategy],
           ][]
         ).map(([key, m]) => {
-          const disabled = key === "self_liquidation" || key === "leverage_loop";
+          const disabled = key === "leverage_loop";
           return (
             <button
               key={key}
@@ -208,9 +208,9 @@ function FlashLoanPanelInner() {
           </div>
         )}
         {strategy === "self_liquidation" && (
-          <div className="mt-2 p-2 bg-bear/10 border border-bear/20 rounded-lg">
-            <p className="text-[10px] text-bear">
-              ⛔ Requires an open LeverVault position to close. This strategy will revert without one.
+          <div className="mt-2 p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+            <p className="text-[10px] text-blue-300">
+              🛡️ Closes your LeverVault position and repays Aave in one tx. Requires an open position. The flash loan borrows slightly more than your position margin to cover the Aave fee.
             </p>
           </div>
         )}}
