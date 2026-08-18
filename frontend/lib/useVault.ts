@@ -132,7 +132,7 @@ const USDC_ARB = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as `0x${string}`;
 const USDC_DECIMALS = 6;
 
 // Vault address from env
-const VAULT_ADDRESS = (process.env.NEXT_PUBLIC_VAULT_ADDRESS || "0x245Db437c4de95e3B9Ba0289060176EBD9702b95") as `0x${string}`;
+const VAULT_ADDRESS = (process.env.NEXT_PUBLIC_VAULT_ADDRESS || "0xd3c9babcedf20f954ad1c2f1e16e82839c1941aa") as `0x${string}`;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

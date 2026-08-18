@@ -29,7 +29,7 @@ const AAVE_V3_POOL_ARBITRUM = "0x794a61358D6845594F94dc1DB02A252b5b4814aD" as `0
 const USDC_ARBITRUM = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as `0x${string}`;
 
 // FlashLoanReceiver on Arbitrum
-const FLASH_LOAN_RECEIVER = "0x9bb98Fd8f3Dc52D09190c18243a8D7E650B0bCc3" as `0x${string}`;
+const FLASH_LOAN_RECEIVER = "0x30d922192be4c276f744beb9fde04a8dfb362c12" as `0x${string}`;
 
 // ─── Strategy IDs ────────────────────────────────────────────────────────
 

@@ -42,6 +42,7 @@ interface ILeverVault {
     function deposit(uint256 amount) external;
     function depositFor(address user, uint256 amount) external;
     function withdraw(uint256 amount) external;
+    function withdrawFor(address user, uint256 amount) external;
     function balances(address user) external view returns (uint256);
     function openPosition(
         bytes32 positionId,
@@ -313,7 +314,10 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
     }
 
     /**
-     * @notice Leverage loop: borrow USDC → deposit to vault → open bigger position → repay.
+     * @notice Leverage loop: borrow USDC → deposit to vault → open position → withdraw to repay Aave.
+     * @dev User must have pre-deposited enough USDC in the vault to cover the Aave repayment.
+     *      Flow: receive USDC from Aave → depositFor(user) → openPosition(user) →
+     *      withdrawFor(user, repayment) → Aave repayment happens automatically.
      * @param strategyParams Encoded: (userAddress, depositAmount, leverageBps)
      */
     function _executeLeverageLoop(
@@ -328,28 +332,42 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
             uint256 leverageBps
         ) = abi.decode(strategyParams, (address, uint256, uint256));
 
-        // Step 1: Deposit borrowed USDC into vault (credited to this contract)
+        // Step 1: Deposit borrowed USDC into vault on behalf of user
+        // This credits user's vault balance, so openPosition can deduct from it
         IERC20(USDC).approve(address(vault), amount);
-        vault.deposit(amount);
+        vault.depositFor(userAddress, amount);
 
-        // Step 2: Open position via operator
-        // Use this contract as user since it holds the deposited balance
-        // Open fee = 0 for leverage loops (operator privilege)
+        // Step 2: Open position for the user
+        // margin = depositAmount (the portion of total vault balance used for the position)
+        // openFee = 1% of depositAmount (operator privilege, can be adjusted)
+        uint256 openFee = depositAmount / 100;
         bytes32 positionId = keccak256(abi.encodePacked(
             userAddress, block.timestamp, "leverage_loop"
         ));
 
         vault.openPosition(
             positionId,
-            address(this),  // this contract holds the balance
-            amount,          // margin = full borrowed amount
-            0,               // open fee = 0 (operator can set any fee)
+            userAddress,
+            depositAmount,
+            openFee,
             "ETH",
             true,
             uint8(leverageBps / 100)
         );
 
-        // Flash loan fee is the cost; user gets leverage without more capital
+        // Step 3: Withdraw from user's vault balance to repay Aave
+        // The user must have enough remaining balance after the position is opened.
+        // After depositFor: userBalance += amount
+        // After openPosition: userBalance -= (depositAmount + openFee)
+        // We need to withdraw (amount + premium) to repay Aave.
+        // Net balance change = amount - depositAmount - openFee - amount - premium
+        //                    = -depositAmount - openFee - premium
+        // User must pre-deposit at least (depositAmount + openFee + premium) in the vault.
+        uint256 repayment = amount + premium;
+        vault.withdrawFor(userAddress, repayment);
+        // USDC is now in this contract, ready for Aave to pull via the approval in executeOperation()
+
+        // The user pays the Aave fee as the cost of leverage
         int256 profit = -int256(premium);
 
         return profit;

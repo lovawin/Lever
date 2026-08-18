@@ -276,6 +276,25 @@ contract LeverVault {
         emit Withdrawn(msg.sender, amount);
     }
 
+    /** @notice Withdraw on behalf of a user (operator only).
+     *  @dev Used by FlashLoanReceiver to repay Aave from user's pre-deposited balance.
+     *  @param user   Address whose balance to withdraw from
+     *  @param amount Amount of USDC to withdraw
+     */
+    function withdrawFor(address user, uint256 amount) external onlyOperator nonReentrant {
+        if (amount == 0) revert ZeroAmount();
+        if (amount < MIN_WITHDRAW) revert BelowMinimum();
+        if (balances[user] < amount) revert InsufficientBalance();
+
+        // CEI pattern: deduct before transfer
+        balances[user] -= amount;
+        totalDeposits -= amount;
+
+        USDC.transfer(msg.sender, amount);
+
+        emit Withdrawn(user, amount);
+    }
+
     /**
      * @notice Withdraw entire balance.
      * @dev Works even when paused (intentional).
