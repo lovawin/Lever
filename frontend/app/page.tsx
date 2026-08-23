@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import WalletBar from "@/components/WalletBar";
 import TradePanel from "@/components/TradePanel";
-import FlashLoanPanel from "@/components/FlashLoanPanel";
+
 import ErrorBoundary from "@/components/ErrorBoundary";
 import OrderBook from "@/components/OrderBook";
 import PriceChart from "@/components/PriceChart";
@@ -167,9 +167,16 @@ export default function Page() {
         ) : (
           <div className="mx-auto max-w-[680px]">
             <div className="glass rounded-2xl p-5">
-              <ErrorBoundary name="Flash Loan">
-                <FlashLoanPanel />
-              </ErrorBoundary>
+              <div className="text-center py-16">
+                <div className="text-5xl mb-4">💎</div>
+                <h2 className="text-xl font-black mb-2">Flash Loans</h2>
+                <p className="text-sm text-muted max-w-sm mx-auto">
+                  Atomic flash loan strategies on Arbitrum — arbitrage, self-liquidation, and leverage loops. Powered by Aave v3.
+                </p>
+                <div className="mt-4 inline-block px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-muted">
+                  🔄 Coming Soon
+                </div>
+              </div>
             </div>
           </div>
         )}
