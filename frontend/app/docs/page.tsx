@@ -302,13 +302,13 @@ export default function DocsPage() {
 
             <h3 className="text-lg font-bold mb-2 text-purple-400">🌀 Spot Leverage Mode</h3>
             <p className="text-sm text-white/60 mb-3">
-              Get leverage on fresh Solana tokens that don&apos;t have perps yet. Three tiers based on availability:
+              Get leverage on fresh Solana tokens that don&apos;t have perps yet — including pump.fun launches. No external API key needed.
             </p>
             <div className="space-y-2 mb-6">
               {[
-                { tier: "Tier 1", label: "Lavarage", desc: "Any token, up to 100x leverage. Uses Lavarage API for margin trading.", color: "text-bull" },
-                { tier: "Tier 2", label: "Kamino + Jupiter", desc: "SOL collateral → borrow USDC → swap to target token via Jupiter. Auto-compounding.", color: "text-blue-400" },
-                { tier: "Tier 3", label: "Jupiter Swap", desc: "Pure spot swap at 1x. No leverage, but instant execution on any Solana token.", color: "text-white/50" },
+                { tier: "Step 1", label: "Kamino Setup", desc: "Create obligation account with SOL as collateral.", color: "text-bull" },
+                { tier: "Step 2", label: "Kamino Borrow", desc: "Borrow USDC against your SOL collateral at your chosen leverage (2x–10x).", color: "text-blue-400" },
+                { tier: "Step 3", label: "Jupiter Swap", desc: "Swap borrowed USDC → your target memecoin. Works on ANY Solana token including pump.fun.", color: "text-purple-400" },
               ].map((t) => (
                 <div key={t.tier} className="flex items-center gap-3 p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl">
                   <span className={`text-xs font-bold ${t.color}`}>{t.tier}</span>
@@ -316,6 +316,12 @@ export default function DocsPage() {
                   <span className="text-xs text-white/40">— {t.desc}</span>
                 </div>
               ))}
+            </div>
+            <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-4 mb-6">
+              <p className="text-sm font-bold text-purple-400 mb-1">🔄 How Custom Leverage Works</p>
+              <p className="text-xs text-white/50">
+                No Lavarage API key required. We built our own leverage engine using Kamino lending markets + Jupiter swaps. Deposit SOL, borrow USDC, swap to any memecoin. True leverage on pump.fun tokens, Jupiter launches, and any SPL token.
+              </p>
             </div>
 
             <h3 className="text-lg font-bold mb-2 text-yellow-400">⚡ Flash Loans — Coming Soon</h3>
