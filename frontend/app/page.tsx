@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import WalletBar from "@/components/WalletBar";
 import TradePanel from "@/components/TradePanel";
 
@@ -12,8 +13,15 @@ import PositionsPanel from "@/components/PositionsPanel";
 import { getAllMids } from "@/lib/hyperliquid";
 import {
   searchTokens,
+  getSolPrice,
   type TokenSearchResult,
+  type LeverageResult,
 } from "@/lib/leverage";
+import {
+  openCustomLeveragePosition,
+  estimateCustomLeverage,
+  type CustomLeverageEstimate,
+} from "@/lib/custom-leverage";
 
 export default function Page() {
   const [tab, setTab] = useState<"perps" | "leverage" | "flash">("perps");
@@ -281,14 +289,87 @@ function SpotLeveragePanel({
   selectedToken: TokenSearchResult | null;
   setSelectedToken: (t: TokenSearchResult | null) => void;
 }) {
+  const { publicKey, connected, wallet } = useWallet();
+  const { connection } = useConnection();
+
+  // Leverage form state
+  const [collateralSol, setCollateralSol] = useState(0.5);
+  const [leverage, setLeverage] = useState(3);
+  const [slippage, setSlippage] = useState(1);
+  const [executing, setExecuting] = useState(false);
+  const [result, setResult] = useState<LeverageResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [solPrice, setSolPrice] = useState<number | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Fetch SOL price when token selected
+  useEffect(() => {
+    if (!selectedToken) return;
+    let alive = true;
+    getSolPrice().then(p => { if (alive) setSolPrice(p); }).catch(() => {});
+    return () => { alive = false; };
+  }, [selectedToken]);
+
+  // Reset state when token changes
+  useEffect(() => {
+    setResult(null);
+    setError(null);
+    setExecuting(false);
+  }, [selectedToken?.mint]);
+
+  // Calculate estimate
+  const estimate: CustomLeverageEstimate | null =
+    solPrice && selectedToken && collateralSol > 0
+      ? estimateCustomLeverage(collateralSol, leverage, solPrice, selectedToken.priceUsd)
+      : null;
+
+  // Execute the custom leverage position
+  const handleExecute = useCallback(async () => {
+    if (!selectedToken) return;
+    if (!connected || !publicKey || !wallet) {
+      setError("Connect your Solana wallet first (Phantom or Solflare).");
+      return;
+    }
+    if (collateralSol <= 0) {
+      setError("Enter a valid SOL collateral amount.");
+      return;
+    }
+
+    setExecuting(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const res = await openCustomLeveragePosition({
+        walletAddress: publicKey.toBase58(),
+        walletAdapter: wallet.adapter,
+        connection,
+        collateralSol,
+        leverage,
+        targetMint: selectedToken.mint,
+        slippagePercent: slippage,
+        solPrice: solPrice ?? undefined,
+      });
+      setResult(res);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      if (e?.steps) setResult({ signatures: e.signatures ?? [], steps: e.steps, provider: "kamino" });
+    } finally {
+      setExecuting(false);
+    }
+  }, [selectedToken, connected, publicKey, wallet, connection, collateralSol, leverage, slippage, solPrice]);
+
+  const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
+  const fmtNum = (n: number, d = 4) => n >= 1000 ? n.toFixed(0) : n >= 1 ? n.toFixed(2) : n.toFixed(d);
+
   return (
     <div>
       <h2 className="text-lg font-black mb-1">🌀 Spot Leverage</h2>
       <p className="text-xs text-muted mb-4">
-        Long any memecoin with leverage on Solana. Search a token, pick your size, and go.
+        Long any memecoin with leverage on Solana. SOL collateral → borrow USDC → swap to target.
       </p>
 
-      {/* Token Search */}
+      {/* ── Token Search ── */}
       {!selectedToken ? (
         <div>
           <input
@@ -323,7 +404,16 @@ function SpotLeveragePanel({
                     <div className="font-bold text-sm truncate">{token.symbol}</div>
                     <div className="text-[10px] text-muted truncate">{token.name}</div>
                   </div>
-                  <div className="text-xs text-muted font-mono">{token.mint.slice(0, 4)}…{token.mint.slice(-4)}</div>
+                  <div className="text-right">
+                    {token.priceUsd != null && (
+                      <div className="text-xs font-mono">${fmtNum(token.priceUsd)}</div>
+                    )}
+                    {token.volume24h != null && token.volume24h > 0 && (
+                      <div className="text-[10px] text-muted">
+                        Vol ${(token.volume24h / 1000).toFixed(0)}k
+                      </div>
+                    )}
+                  </div>
                 </button>
               ))}
             </div>
@@ -341,6 +431,7 @@ function SpotLeveragePanel({
         </div>
       ) : (
         <div>
+          {/* Back button */}
           <button
             onClick={() => setSelectedToken(null)}
             className="text-xs text-muted hover:text-white mb-3 flex items-center gap-1"
@@ -348,6 +439,7 @@ function SpotLeveragePanel({
             ← Back to search
           </button>
 
+          {/* ── Token Info ── */}
           <div className="flex items-center gap-3 mb-4">
             {selectedToken.logoUri ? (
               <img src={selectedToken.logoUri} alt="" className="w-10 h-10 rounded-full" />
@@ -356,31 +448,252 @@ function SpotLeveragePanel({
                 {selectedToken.symbol.slice(0, 2)}
               </div>
             )}
-            <div>
+            <div className="flex-1">
               <div className="font-black text-lg">{selectedToken.symbol}</div>
               <div className="text-xs text-muted">{selectedToken.name}</div>
             </div>
+            {selectedToken.priceUsd != null && (
+              <div className="text-right">
+                <div className="text-sm font-mono">${fmtNum(selectedToken.priceUsd)}</div>
+                {selectedToken.volume24h != null && selectedToken.volume24h > 0 && (
+                  <div className="text-[10px] text-muted">
+                    24h Vol ${(selectedToken.volume24h / 1000).toFixed(0)}k
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
+          {/* Mint info */}
           <div className="bg-white/[0.03] rounded-xl p-3 mb-3 text-xs text-muted space-y-1">
-            <div>Mint: <span className="font-mono text-white">{selectedToken.mint}</span></div>
+            <div>Mint: <span className="font-mono text-white text-[10px]">{selectedToken.mint}</span></div>
+            {selectedToken.liquidity != null && selectedToken.liquidity > 0 && (
+              <div>Liquidity: <span className="font-mono text-white">${(selectedToken.liquidity / 1000).toFixed(0)}k</span></div>
+            )}
           </div>
 
-          <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3 mb-4">
-            <div className="text-xs font-bold text-purple-400 mb-1">How Spot Leverage Works</div>
-            <div className="text-xs text-muted space-y-1">
-              <div>1. Connect your Solana wallet (Phantom / Solflare)</div>
-              <div>2. Choose leverage size (2x–100x)</div>
-              <div>3. Lavarage / Kamino opens a leveraged long position</div>
-              <div>4. Your collateral is at risk — manage risk carefully</div>
+          {/* ── Leverage Form ── */}
+          <div className="space-y-4">
+            {/* SOL Collateral Input */}
+            <div>
+              <label className="text-xs font-bold text-muted uppercase tracking-wider mb-1.5 block">
+                SOL Collateral
+              </label>
+              <input
+                type="number"
+                value={collateralSol}
+                onChange={(e) => setCollateralSol(Math.max(0, parseFloat(e.target.value) || 0))}
+                step={0.1}
+                min={0}
+                placeholder="0.5"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-purple-500/50"
+              />
+              {solPrice && collateralSol > 0 && (
+                <div className="text-[10px] text-muted mt-1">
+                  ≈ {fmtUsd(collateralSol * solPrice)}
+                </div>
+              )}
             </div>
-          </div>
 
-          <div className="text-center text-xs text-muted py-4 border border-white/5 rounded-xl">
-            🔄 Spot leverage execution coming soon — token search is live
+            {/* Leverage Slider */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-muted uppercase tracking-wider">
+                  Leverage
+                </label>
+                <span className={`text-sm font-black ${leverage >= 7 ? 'text-red-400' : leverage >= 5 ? 'text-orange-400' : 'text-purple-400'}`}>
+                  {leverage}x
+                </span>
+              </div>
+              <input
+                type="range"
+                min={2}
+                max={10}
+                step={0.5}
+                value={leverage}
+                onChange={(e) => setLeverage(parseFloat(e.target.value))}
+                className="w-full accent-purple-500"
+              />
+              <div className="flex justify-between text-[10px] text-muted mt-0.5">
+                <span>2x</span>
+                <span>5x</span>
+                <span>10x</span>
+              </div>
+            </div>
+
+            {/* ── Estimates ── */}
+            {estimate && (
+              <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 space-y-2">
+                <div className="text-xs font-bold text-muted uppercase tracking-wider mb-1">Position Estimate</div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <div className="text-muted text-[10px]">Position Size</div>
+                    <div className="font-mono font-bold text-white">{fmtUsd(estimate.positionSizeUsd)}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted text-[10px]">Borrow Amount</div>
+                    <div className="font-mono font-bold text-orange-400">{fmtUsd(estimate.borrowUsd)}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted text-[10px]">Collateral Value</div>
+                    <div className="font-mono font-bold text-green-400">{fmtUsd(estimate.collateralUsd)}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted text-[10px]">Liquidation Drop</div>
+                    <div className={`font-mono font-bold ${estimate.liquidationDropPct <= 20 ? 'text-red-400' : 'text-yellow-400'}`}>
+                      -{estimate.liquidationDropPct.toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+                {estimate.estimatedTokens > 0 && selectedToken.priceUsd && (
+                  <div className="pt-1 border-t border-white/5">
+                    <div className="text-muted text-[10px]">Est. Tokens Received</div>
+                    <div className="font-mono font-bold text-purple-400 text-sm">
+                      {fmtNum(estimate.estimatedTokens)} {selectedToken.symbol}
+                    </div>
+                  </div>
+                )}
+                <div className="pt-1 border-t border-white/5 text-[10px] text-muted">
+                  ⚠ Liquidation if SOL drops {estimate.liquidationDropPct.toFixed(1)}% from entry
+                </div>
+              </div>
+            )}
+
+            {/* Advanced: Slippage */}
+            <div>
+              <button
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="text-[10px] text-muted hover:text-white"
+              >
+                {showAdvanced ? "▼" : "▶"} Advanced
+              </button>
+              {showAdvanced && (
+                <div className="mt-2">
+                  <label className="text-xs text-muted">Slippage ({slippage}%)</label>
+                  <input
+                    type="range"
+                    min={0.1}
+                    max={5}
+                    step={0.1}
+                    value={slippage}
+                    onChange={(e) => setSlippage(parseFloat(e.target.value))}
+                    className="w-full accent-purple-500 mt-1"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* ── Wallet Connection Warning ── */}
+            {!connected && (
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2.5 text-xs text-yellow-400">
+                ⚠ Connect your Solana wallet to execute. Use the wallet button in the header.
+              </div>
+            )}
+
+            {/* ── Execute Button ── */}
+            <button
+              onClick={handleExecute}
+              disabled={executing || !connected || collateralSol <= 0}
+              className={`w-full py-3 rounded-xl text-sm font-black transition-all ${
+                executing
+                  ? "bg-purple-500/30 text-purple-300 cursor-wait"
+                  : connected && collateralSol > 0
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/40 hover:bg-purple-500/30 hover:border-purple-500/60"
+                  : "bg-white/5 text-muted border border-white/5 cursor-not-allowed"
+              }`}
+            >
+              {executing ? "Executing…" : connected ? `Open ${leverage}x Long` : "Connect Wallet to Continue"}
+            </button>
+
+            {/* ── Step Progress ── */}
+            {executing && (
+              <div className="space-y-1.5">
+                <ProgressStep label="Setup — Create Kamino obligation" step={0} steps={result?.steps} />
+                <ProgressStep label="Borrow — Open leveraged position" step={1} steps={result?.steps} />
+                <ProgressStep label="Swap — USDC → target token" step={2} steps={result?.steps} />
+              </div>
+            )}
+
+            {/* ── Result Steps ── */}
+            {result && !executing && (
+              <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 space-y-1.5">
+                <div className="text-xs font-bold text-green-400 mb-1">📋 Transaction Steps</div>
+                {result.steps.map((step, i) => (
+                  <div key={i} className="text-xs font-mono text-muted flex gap-2">
+                    <span className="text-muted/50">{i + 1}.</span>
+                    <span className={step.startsWith("✅") ? "text-green-400" : step.startsWith("⚠") ? "text-yellow-400" : "text-muted"}>
+                      {step}
+                    </span>
+                  </div>
+                ))}
+                {result.signatures.length > 0 && (
+                  <div className="pt-2 border-t border-white/5">
+                    {result.signatures.map((sig, i) => (
+                      <a
+                        key={i}
+                        href={`https://solscan.io/tx/${sig}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-[10px] font-mono text-blue-400 hover:text-blue-300 truncate"
+                      >
+                        🔗 {sig}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Error ── */}
+            {error && !executing && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-400">
+                <div className="font-bold mb-1">❌ Error</div>
+                <div className="font-mono text-[11px] whitespace-pre-wrap">{error}</div>
+              </div>
+            )}
+
+            {/* ── How It Works ── */}
+            <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3">
+              <div className="text-xs font-bold text-purple-400 mb-1">How Custom Leverage Works</div>
+              <div className="text-xs text-muted space-y-1">
+                <div>1. <span className="text-white">Setup</span> — Create Kamino obligation (SOL collateral, USDC debt)</div>
+                <div>2. <span className="text-white">Borrow</span> — Kamino opens leveraged position, borrows USDC against SOL</div>
+                <div>3. <span className="text-white">Swap</span> — Jupiter swaps borrowed USDC → {selectedToken.symbol}</div>
+                <div className="pt-1 text-yellow-400/80">⚠ Your SOL collateral is at risk if liquidated. Manage risk carefully.</div>
+              </div>
+            </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Step Progress Indicator ──────────────────────────────────────────────
+
+function ProgressStep({
+  label,
+  step,
+  steps,
+}: {
+  label: string;
+  step: number;
+  steps?: string[];
+}) {
+  const doneCount = steps?.filter(s => s.startsWith("✅") || s.startsWith("ℹ") || s.startsWith("⚠")).length ?? 0;
+  const isDone = step < doneCount;
+  const isInProgress = step === doneCount;
+  const isPending = step > doneCount;
+
+  return (
+    <div className={`flex items-center gap-2 text-xs ${isDone ? "text-green-400" : isInProgress ? "text-purple-400" : "text-muted/50"}`}>
+      <div className={`
+        w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0
+        ${isDone ? "bg-green-500/20" : isInProgress ? "bg-purple-500/20 animate-pulse" : "bg-white/5"}
+      `}>
+        {isDone ? "✓" : step + 1}
+      </div>
+      <span>{label}</span>
     </div>
   );
 }
