@@ -11,7 +11,7 @@ const SECTIONS = [
   { id: "custody", label: "Self-Custody" },
   { id: "how-it-works", label: "How It Works" },
   { id: "fees", label: "Fee Structure" },
-  { id: "flash-loans", label: "Flash Loans" },
+  // Flash Loans removed — coming soon
   { id: "security", label: "Security" },
   { id: "math", label: "The Math" },
   { id: "compare", label: "Lever vs Others" },
@@ -73,7 +73,7 @@ export default function DocsPage() {
               Lever Docs <span className="text-bull">↗</span>
             </h1>
             <p className="text-white/70 leading-relaxed mb-4">
-              Lever is the first platform that lets you go <strong className="text-white">long or short on fresh memecoins</strong> with real leverage — not just spot swaps, not just perps on BTC/ETH. We combine on-chain vaults, Hyperliquid perps, Solana spot leverage, and flash loans into one seamless trading experience.
+              Lever is the first platform that lets you go <strong className="text-white">long or short on fresh memecoins</strong> with real leverage — not just spot swaps, not just perps on BTC/ETH. We combine on-chain vaults, Hyperliquid perps, and Solana spot leverage into one seamless trading experience.
             </p>
             <div className="bg-gradient-to-r from-bull/5 to-purple-500/5 border border-bull/20 rounded-xl p-5">
               <p className="text-sm font-bold text-bull mb-2">🚀 The Problem</p>
@@ -82,7 +82,7 @@ export default function DocsPage() {
               </p>
               <p className="text-sm font-bold text-purple-400 mt-3 mb-2">💡 The Solution</p>
               <p className="text-sm text-white/70">
-                Lever gives you three ways to trade memecoins with leverage: <strong className="text-white">HL Perps</strong> for established coins, <strong className="text-white">Spot Leverage</strong> via Kamino/Jupiter for fresh Solana tokens, and <strong className="text-white">Flash Loans</strong> for atomic arbitrage and leverage loops on Arbitrum.
+                Lever gives you two ways to trade memecoins with leverage: <strong className="text-white">HL Perps</strong> for established coins and <strong className="text-white">Spot Leverage</strong> via Kamino/Jupiter for fresh Solana tokens. Flash Loans are <span className="text-yellow-400">coming soon</span>.
               </p>
             </div>
           </section>
@@ -95,9 +95,9 @@ export default function DocsPage() {
                 { emoji: "⚡", title: "Fresh Memecoin Leverage", desc: "Trade the newest Solana tokens with up to 100x leverage via Lavarage, Kamino, and Jupiter. No waiting for perps to list." },
                 { emoji: "🔒", title: "Non-Custodial Vault", desc: "Your USDC sits in the LeverVault smart contract. You can ALWAYS withdraw — even when paused. Emergency withdraw, withdrawAll, and withdraw have no operator gate. The contract literally cannot refuse your withdrawal." },
                 { emoji: "💸", title: "Free Withdrawals", desc: "Deposits and withdrawals are always free. We only charge on trades — open, close, and profit fees. No hidden spread." },
-                { emoji: "🌊", title: "Flash Loan Arbitrage", desc: "Borrow from Aave v3, execute strategies atomically, and repay in one transaction. Zero risk if the trade fails — the whole tx reverts." },
                 { emoji: "🎯", title: "3-Point Fee System", desc: "Open fee + close fee + profit fee (winning trades only). Losing trades only pay open+close. Diamond NFT holders pay zero." },
-                { emoji: "🛡️", title: "Battle-Tested Contracts", desc: "LeverVault and FlashLoanReceiver are deployed on Arbitrum with reentrancy guards, two-step ownership, emergency withdrawals, and full test coverage." },
+                { emoji: "🛡️", title: "Battle-Tested Contracts", desc: "LeverVault is deployed on Arbitrum with reentrancy guards, two-step ownership, emergency withdrawals, and full test coverage. FlashLoanReceiver coming soon." },
+                { emoji: "🌊", title: "Flash Loans — Coming Soon", desc: "Atomic arbitrage, self-liquidation, and leverage loops via Aave v3 flash loans on Arbitrum. Currently in development." },
               ].map((item) => (
                 <div key={item.title} className="flex gap-4 p-4 bg-white/[0.02] border border-white/[0.06] rounded-xl">
                   <span className="text-2xl">{item.emoji}</span>
@@ -318,21 +318,13 @@ export default function DocsPage() {
               ))}
             </div>
 
-            <h3 className="text-lg font-bold mb-2 text-yellow-400">⚡ Flash Loan Mode</h3>
-            <p className="text-sm text-white/60 mb-3">
-              Atomic strategies on Arbitrum — borrow from Aave v3, execute, repay, all in one transaction. If anything fails, the whole thing reverts. Zero capital risk.
-            </p>
+            <h3 className="text-lg font-bold mb-2 text-yellow-400">⚡ Flash Loans — Coming Soon</h3>
             <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4 font-mono text-xs text-white/60">
-              <div className="text-yellow-400 font-bold mb-2 text-sm font-sans">Flow: Flash Loan</div>
+              <div className="text-yellow-400 font-bold mb-2 text-sm font-sans">Flash Loan Mode</div>
               <div className="space-y-1">
-                <div>1. You choose strategy + amount</div>
-                <div>2. Lever calls Aave v3 Pool.flashLoanSimple()</div>
-                <div>3. FlashLoanReceiver.executeOperation() runs</div>
-                <div>   ├─ Arbitrage: buy low → sell high → profit</div>
-                <div>   ├─ Self-liquidation: borrow USDC → close position → save 5%</div>
-                <div>   └─ Leverage loop: borrow USDC → deposit vault → open position</div>
-                <div>4. Aave verifies repayment (principal + 0.05% fee)</div>
-                <div>5. If repayment fails → entire tx reverts → zero risk</div>
+                <div>Atomic strategies on Arbitrum via Aave v3 flash loans.</div>
+                <div>Features in development: arbitrage, self-liquidation, leverage loops.</div>
+                <div>Stay tuned — coming soon.</div>
               </div>
             </div>
           </section>
@@ -422,109 +414,17 @@ export default function DocsPage() {
             </div>
           </section>
 
-          {/* ─── Flash Loans ──────────────────────────────────── */}
-          <section id="flash-loans" className="scroll-mt-24">
-            <h2 className="text-2xl font-black mb-4">Flash Loans</h2>
-            <p className="text-sm text-white/60 mb-4">
-              Flash loans let you borrow millions of dollars with <strong className="text-white">zero collateral</strong> for the duration of a single transaction. If you can&apos;t repay, the entire transaction reverts — you lose nothing.
-            </p>
-
-            <div className="grid gap-3 mb-6">
-              {[
-                {
-                  emoji: "⚡",
-                  title: "Arbitrage",
-                  color: "border-yellow-500/20 bg-yellow-500/5",
-                  titleColor: "text-yellow-400",
-                  desc: "Borrow USDC from Aave → buy token on DEX A → sell on DEX B → repay Aave. Profit from price differences across exchanges.",
-                  fee: "0.55% total (0.05% Aave + 5% Lever + gas)",
-                },
-                {
-                  emoji: "🛡️",
-                  title: "Self-Liquidation",
-                  color: "border-blue-500/20 bg-blue-500/5",
-                  titleColor: "text-blue-400",
-                  desc: "Borrow USDC → close your position before forced liquidation. Cheaper than the penalty — pay only the flash loan fee instead of the full liquidation hit.",
-                  fee: "0.55% total vs 5%+ liquidation penalty",
-                },
-                {
-                  emoji: "🔄",
-                  title: "Leverage Loop",
-                  color: "border-purple-500/20 bg-purple-500/5",
-                  titleColor: "text-purple-400",
-                  desc: "Deposit $100, borrow $400 from Aave, trade with $500 total. Get 5x leverage with only $100 of your own capital at risk.",
-                  fee: "5% Lever fee on borrowed amount + 0.05% Aave + gas",
-                },
-              ].map((s) => (
-                <div key={s.title} className={`p-4 rounded-xl border ${s.color}`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-lg">{s.emoji}</span>
-                    <span className={`text-sm font-bold ${s.titleColor}`}>{s.title}</span>
-                  </div>
-                  <p className="text-xs text-white/50 mb-2">{s.desc}</p>
-                  <p className="text-xs font-mono text-white/30">{s.fee}</p>
-                </div>
-              ))}
-            </div>
-
-            {/* Flash loan math */}
-            <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5">
-              <p className="text-sm font-bold text-white mb-3">📊 Flash Loan Math: Leverage Loop Example</p>
-              <div className="space-y-2 text-xs font-mono">
-                <div className="flex justify-between">
-                  <span className="text-white/50">Your deposit</span>
-                  <span className="text-white">$100</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/50">Borrow from Aave (4x)</span>
-                  <span className="text-yellow-400">$400</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/50">Total position size</span>
-                  <span className="text-white font-bold">$500</span>
-                </div>
-                <div className="border-t border-white/5 pt-2" />
-                <div className="flex justify-between">
-                  <span className="text-white/50">Aave fee (0.05% of $400)</span>
-                  <span className="text-bear">$0.20</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/50">Lever fee (5% of $400)</span>
-                  <span className="text-bear">$20.00</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/50">Gas (Arbitrum)</span>
-                  <span className="text-white/50">~$0.10</span>
-                </div>
-                <div className="border-t border-white/5 pt-2" />
-                <div className="flex justify-between font-bold">
-                  <span className="text-white/50">Total cost</span>
-                  <span className="text-white">$20.30</span>
-                </div>
-                <div className="flex justify-between text-bull">
-                  <span>Effective leverage</span>
-                  <span>5x ($500 position / $100 deposit)</span>
-                </div>
-                <div className="flex justify-between text-white/30">
-                  <span>Break-even move needed</span>
-                  <span>~4.06% ($20.30 / $500)</span>
-                </div>
-              </div>
-            </div>
-          </section>
-
           {/* ─── Security ──────────────────────────────────────── */}
           <section id="security" className="scroll-mt-24">
             <h2 className="text-2xl font-black mb-4">Security</h2>
             <div className="grid gap-3 mb-6">
               {[
                 { icon: "🔒", title: "Non-Custodial", desc: "LeverVault holds your USDC on Arbitrum. You can withdraw anytime — even if the protocol is paused. Emergency withdraw is always available." },
-                { icon: "🛡️", title: "ReentrancyGuard", desc: "Both LeverVault and FlashLoanReceiver use reentrancy guards on all external-facing functions. No re-entrancy attacks." },
-                { icon: "⏸️", title: "Pausable", desc: "Owner can pause all operations in an emergency. FlashLoanReceiver can be paused independently. Emergency withdrawals work even when paused." },
+                { icon: "🛡️", title: "ReentrancyGuard", desc: "LeverVault uses reentrancy guards on all external-facing functions. No re-entrancy attacks." },
+                { icon: "⏸️", title: "Pausable", desc: "Owner can pause all operations in an emergency. Emergency withdrawals work even when paused." },
                 { icon: "🚨", title: "Emergency Withdraw", desc: "Pull ALL tokens out instantly — USDC, ETH, any ERC20. Your escape hatch that never goes away." },
                 { icon: "🔑", title: "Two-Step Ownership", desc: "Ownership transfers require the new owner to accept. No accidentally sending control to the wrong address." },
-                { icon: "✅", title: "Strategy Whitelist", desc: "Flash loan strategies (arbitrage, self-liquidation, leverage loop) must be explicitly enabled by the owner. Unknown strategies are rejected." },
-                { icon: "📝", title: "74 Tests Passing", desc: "LeverVault: 50 tests. FlashLoanReceiver: 24 tests. Full coverage on deposits, withdrawals, positions, fees, emergency actions, and access control." },
+                { icon: "📝", title: "50 Tests Passing", desc: "LeverVault: 50 tests. Full coverage on deposits, withdrawals, positions, fees, emergency actions, and access control." },
                 { icon: "🔍", title: "Verified Contracts", desc: "All contracts deployed on Arbitrum One. Source code verifiable on Arbiscan." },
               ].map((item) => (
                 <div key={item.title} className="flex gap-3 p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl">
@@ -542,15 +442,15 @@ export default function DocsPage() {
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
                   <span className="text-white/50">LeverVault</span>
-                  <a href="https://arbiscan.io/address/0x245Db437c4de95e3B9Ba0289060176EBD9702b95" target="_blank" rel="noopener noreferrer" className="text-bull hover:underline break-all">0x245Db437c4de95e3B9Ba0289060176EBD9702b95</a>
+                  <a href="https://arbiscan.io/address/0xe7ed6455fc473bba35ee573d20e8c3e80d7c6801" target="_blank" rel="noopener noreferrer" className="text-bull hover:underline break-all">0xe7ed6455fc473bba35ee573d20e8c3e80d7c6801</a>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
                   <span className="text-white/50">FlashLoanReceiver</span>
-                  <a href="https://arbiscan.io/address/0x9bb98Fd8f3Dc52D09190c18243a8D7E650B0bCc3" target="_blank" rel="noopener noreferrer" className="text-bull hover:underline break-all">0x9bb98Fd8f3Dc52D09190c18243a8D7E650B0bCc3</a>
+                  <span className="text-yellow-400/70">Coming Soon</span>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
                   <span className="text-white/50">Treasury</span>
-                  <a href="https://arbiscan.io/address/0xdb903f520Ce8CD7E8044f497130dD75306e77725" target="_blank" rel="noopener noreferrer" className="text-bull hover:underline break-all">0xdb903f520Ce8CD7E8044f497130dD75306e77725</a>
+                  <a href="https://arbiscan.io/address/0xf8E3385029d4f1B374B17781D971971ADec6D7C5" target="_blank" rel="noopener noreferrer" className="text-bull hover:underline break-all">0xf8E3385029d4f1B374B17781D971971ADec6D7C5</a>
                 </div>
               </div>
             </div>
@@ -639,32 +539,7 @@ export default function DocsPage() {
               </div>
             </div>
 
-            <h3 className="text-lg font-bold mb-2 text-white">Flash Loan Repayment</h3>
-            <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5">
-              <div className="space-y-2 text-sm font-mono">
-                <div>
-                  <span className="text-white/40">repayment = </span>
-                  <span className="text-white">borrowAmount + aaveFee + leverFee</span>
-                </div>
-                <div>
-                  <span className="text-white/40">aaveFee = </span>
-                  <span className="text-white">borrowAmount × 0.05%</span>
-                </div>
-                <div>
-                  <span className="text-white/40">leverFee = </span>
-                  <span className="text-white">borrowAmount × 5%</span>
-                </div>
-                <div>
-                  <span className="text-white/40">gasEstimate ≈ </span>
-                  <span className="text-white">$0.10 (Arbitrum)</span>
-                </div>
-                <div className="border-t border-white/5 pt-2" />
-                <div>
-                  <span className="text-white/40">totalCost = </span>
-                  <span className="text-bull">borrowAmount × 5.05% + $0.10</span>
-                </div>
-              </div>
-            </div>
+
           </section>
 
           {/* ─── Comparison ─────────────────────────────────────── */}
@@ -705,7 +580,7 @@ export default function DocsPage() {
                   </tr>
                   <tr className="border-b border-white/5">
                     <td className="py-2 px-2">Flash loan arbitrage</td>
-                    <td className="py-2 px-2 text-center text-bull font-bold">✅</td>
+                    <td className="py-2 px-2 text-center text-yellow-400">Coming Soon</td>
                     <td className="py-2 px-2 text-center text-white/30">❌</td>
                     <td className="py-2 px-2 text-center text-white/30">❌</td>
                     <td className="py-2 px-2 text-center text-white/30">❌</td>
@@ -782,8 +657,7 @@ export default function DocsPage() {
                 { icon: "📉", title: "Liquidation Risk", desc: "Leveraged positions can be liquidated if price moves against you. Use stop-losses and manage position size carefully." },
                 { icon: "💸", title: "Fee Impact", desc: "At 4.5% open + 4.5% close (Iron tier), you need the price to move >9% in your favor just to break even on a 1x trade. Higher leverage means smaller break-even moves." },
                 { icon: "🔀", title: "Smart Contract Risk", desc: "While audited and tested, smart contracts carry inherent risk. Only deposit what you can afford to lose. Emergency withdraw is your safety net." },
-                { icon: "🌊", title: "Flash Loan Risk", desc: "Flash loans are atomic — if the strategy doesn&apos;t profit, the transaction reverts and you lose only gas. However, unexpected market conditions can cause slippage." },
-                { icon: "⛓️", title: "Cross-Chain Risk", desc: "HL perps run on Hyperliquid, spot leverage on Solana, flash loans on Arbitrum. Each chain has its own risks including downtime and congestion." },
+                { icon: "⛓️", title: "Cross-Chain Risk", desc: "HL perps run on Hyperliquid, spot leverage on Solana. Each chain has its own risks including downtime and congestion." },
               ].map((r) => (
                 <div key={r.title} className="flex gap-3 p-3 bg-white/[0.02] border border-bear/10 rounded-xl">
                   <span className="text-lg">{r.icon}</span>
@@ -802,8 +676,7 @@ export default function DocsPage() {
               Lever Protocol — Built on Arbitrum + Solana · Contracts verified on Arbiscan
             </p>
             <div className="mt-2 flex justify-center gap-4">
-              <a href="https://arbiscan.io/address/0x245Db437c4de95e3B9Ba0289060176EBD9702b95" target="_blank" rel="noopener noreferrer" className="text-xs text-bull/50 hover:text-bull transition">Vault</a>
-              <a href="https://arbiscan.io/address/0x9bb98Fd8f3Dc52D09190c18243a8D7E650B0bCc3" target="_blank" rel="noopener noreferrer" className="text-xs text-bull/50 hover:text-bull transition">FlashLoan</a>
+              <a href="https://arbiscan.io/address/0xe7ed6455fc473bba35ee573d20e8c3e80d7c6801" target="_blank" rel="noopener noreferrer" className="text-xs text-bull/50 hover:text-bull transition">Vault</a>
               <Link href="/" className="text-xs text-bull/50 hover:text-bull transition">Trade</Link>
             </div>
           </div>
