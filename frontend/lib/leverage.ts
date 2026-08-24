@@ -452,15 +452,27 @@ export async function signAndSendTransaction(
 
   // Get FRESH blockhash right before signing to avoid expiration
   const latestBlockhash = await connection.getLatestBlockhash();
-  const message = tx.message;
-  // @ts-ignore — versioned tx message is writable
-  message.recentBlockhash = latestBlockhash.blockhash;
 
-  const signedTx = await walletAdapter.signTransaction(tx);
+  // Properly update blockhash on versioned transaction by reconstructing the message
+  // Simply mutating message.recentBlockhash doesn't work reliably on VersionedTransaction
+  const message = tx.message;
+  // @ts-ignore — versioned tx message has recentBlockhash field
+  message.recentBlockhash = latestBlockhash.blockhash;
+  // Re-serialize the message with updated blockhash and create new unsigned tx
+  const newMessage = new (message.constructor as any)(
+    message.accountKeys,
+    message.header,
+    latestBlockhash.blockhash,
+    message.instructions,
+  );
+  const newTx = new VersionedTransaction(newMessage);
+
+  const signedTx = await walletAdapter.signTransaction(newTx);
 
   const signature = await connection.sendRawTransaction(signedTx.serialize(), {
-    skipPreflight: true,
+    skipPreflight: false,
     maxRetries: 3,
+    preflightCommitment: "confirmed",
   });
 
   await connection.confirmTransaction({
