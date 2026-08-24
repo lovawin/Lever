@@ -352,10 +352,13 @@ function SpotLeveragePanel({
     setBridgeError(null);
   }, [selectedToken?.mint]);
 
-  // Calculate estimate
+  // Calculate estimate — use bridged USDC for EVM users, SOL collateral for Solana users
+  const effectiveCollateralSol = isEvmOnly && solPrice && bridgeUsdcAmount > 0
+    ? bridgeUsdcAmount / solPrice
+    : collateralSol;
   const estimate: CustomLeverageEstimate | null =
-    solPrice && selectedToken && collateralSol > 0
-      ? estimateCustomLeverage(collateralSol, leverage, solPrice, selectedToken.priceUsd)
+    solPrice && selectedToken && effectiveCollateralSol > 0
+      ? estimateCustomLeverage(effectiveCollateralSol, leverage, solPrice, selectedToken.priceUsd)
       : null;
 
   // ─── Cross-chain bridge + leverage execution ────────────────────────
@@ -672,8 +675,8 @@ function SpotLeveragePanel({
                   <input
                     type="number"
                     value={bridgeUsdcAmount}
-                    onChange={(e) => setBridgeUsdcAmount(Math.max(0, parseFloat(e.target.value) || 0))}
-                    step={10}
+                    onChange={(e) => setBridgeUsdcAmount(Math.max(1, parseFloat(e.target.value) || 0))}
+                    step={1}
                     min={1}
                     placeholder="50"
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-blue-500/50"
