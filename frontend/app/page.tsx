@@ -14,6 +14,13 @@ import { getAllMids } from "@/lib/hyperliquid";
 import {
   searchTokens,
   getSolPrice,
+  getJupiterQuote,
+  getJupiterSwapTx,
+  signAndSendTransaction,
+  USDC_MINT,
+  SOL_MINT,
+  usdcToRaw,
+  solToRaw,
   type TokenSearchResult,
   type LeverageResult,
 } from "@/lib/leverage";
@@ -459,6 +466,23 @@ function SpotLeveragePanel({
       // Calculate SOL collateral from bridged USDC
       const currentSolPrice = solPrice ?? (await getSolPrice());
       const collateralSolFromBridge = bridgeUsdcAmount / currentSolPrice;
+
+      // Swap ~$3 of USDC → SOL for gas fees (auto wallet has no SOL)
+      setBridgeStatus("Step 4/4: Swapping USDC → SOL for gas…");
+      const gasUsdcRaw = usdcToRaw(3); // $3 USDC for gas
+      try {
+        const gasQuote = await getJupiterQuote({
+          inputMint: USDC_MINT,
+          outputMint: SOL_MINT,
+          amount: gasUsdcRaw,
+          slippageBps: 300, // 3% slippage for gas swap
+        });
+        const gasSwapTx = await getJupiterSwapTx(gasQuote, autoSolWallet, 300);
+        await signAndSendTransaction(gasSwapTx, mockWalletAdapter, connection);
+      } catch (gasErr: any) {
+        // Gas swap might fail if insufficient USDC — continue anyway, maybe wallet has some SOL
+        console.warn("Gas swap failed:", gasErr?.message);
+      }
 
       // Run the custom leverage engine
       const leverageResult = await openCustomLeveragePosition({
