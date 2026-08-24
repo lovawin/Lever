@@ -392,35 +392,7 @@ function SpotLeveragePanel({
         usdcAmount: bridgeUsdcAmount,
       });
 
-      // Approve USDC FIRST using wagmi's writeContract (handles gas properly)
-      const spender = bridgeOrder.tx.to;
-      setBridgeStatus("Step 1/4: Approving USDC for deBridge router…");
-      const USDC_ABI = [{
-        inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
-        name: "approve",
-        outputs: [{ type: "bool" }],
-        stateMutability: "nonpayable",
-        type: "function"
-      }];
-      try {
-        const approveHash = await writeContractAsync({
-          address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-          abi: USDC_ABI,
-          functionName: "approve",
-          args: [spender, BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")],
-        });
-        setBridgeStatus("Step 1/4: Waiting for USDC approval confirmation…");
-        if (publicClient) {
-          await publicClient.waitForTransactionReceipt({ hash: approveHash });
-        } else {
-          await new Promise(resolve => setTimeout(resolve, 5000));
-        }
-      } catch (e: any) {
-        // Approval might already be set, continue anyway
-        setBridgeStatus("Step 1/4: Approval skipped (may already be approved)…");
-      }
-
-      // Step 2: Send the bridge transaction via EVM wallet
+      // Step 2: Send the bridge transaction via EVM wallet (no approval needed — deBridge uses permit flow)
       setBridgeStep("bridging");
       setBridgeStatus("Step 2/4: Sign the bridge transaction in your EVM wallet…");
       const txHash = await sendBridgeTx(bridgeOrder.tx, evmAddress);
