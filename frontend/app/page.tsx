@@ -31,7 +31,7 @@ import {
   approveUsdc,
   getOrderIdByTxHash,
 } from "@/lib/cross-chain";
-import { useAccount as useWagmiAccount } from "wagmi";
+import { useAccount as useWagmiAccount, useWriteContract, usePublicClient } from "wagmi";
 
 export default function Page() {
   const [tab, setTab] = useState<"perps" | "leverage" | "flash">("perps");

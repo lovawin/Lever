@@ -609,44 +609,59 @@ export async function checkUsdcAllowance(
  */
 export async function approveUsdc(
   spender: string,
-  fromAddress: string
+  fromAddress: string,
+  writeContract?: any,
+  publicClient?: any
 ): Promise<string | null> {
   if (typeof window === "undefined" || !(window as any).ethereum) {
     throw new Error("No EVM wallet found");
   }
 
-  const ethereum = (window as any).ethereum;
-
   // Check existing allowance first
   const hasAllowance = await checkUsdcAllowance(fromAddress, spender);
   if (hasAllowance) return null;
 
-  // approve(address spender, uint256 amount) = 0x095ea7b3
-  // Approve max uint256 for convenience
-  const maxUint256 = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+  // Use wagmi's writeContract if available (handles gas estimation properly)
+  if (writeContract && publicClient) {
+    const USDC_ABI = [{
+      inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
+      name: "approve",
+      outputs: [{ type: "bool" }],
+      stateMutability: "nonpayable",
+      type: "function"
+    }];
+
+    const hash = await writeContract({
+      address: USDC_ARBITRUM,
+      abi: USDC_ABI,
+      functionName: "approve",
+      args: [spender, BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")],
+    });
+
+    // Wait for confirmation
+    await publicClient.waitForTransactionReceipt({ hash });
+    return hash;
+  }
+
+  // Fallback: raw eth_sendTransaction with manual gas estimation
+  const ethereum = (window as any).ethereum;
   const spenderPadded = spender.toLowerCase().slice(2).padStart(64, "0");
+  const maxUint256 = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
   const approveData = "0x095ea7b3" + spenderPadded + maxUint256;
 
-  // Estimate gas first to avoid UNPREDICTABLE_GAS_LIMIT
-  let gasLimit = "0x100000"; // default 1M gas
+  // Estimate gas first
+  let gasLimit = "0x100000";
   try {
     const estimate = await ethereum.request({
       method: "eth_estimateGas",
       params: [{ from: fromAddress, to: USDC_ARBITRUM, data: approveData }],
     });
     if (estimate) gasLimit = estimate;
-  } catch {
-    // Keep default if estimation fails
-  }
+  } catch {}
 
   const txHash: string = await ethereum.request({
     method: "eth_sendTransaction",
-    params: [{
-      from: fromAddress,
-      to: USDC_ARBITRUM,
-      data: approveData,
-      gasLimit,
-    }],
+    params: [{ from: fromAddress, to: USDC_ARBITRUM, data: approveData, gasLimit }],
   });
 
   return txHash;
