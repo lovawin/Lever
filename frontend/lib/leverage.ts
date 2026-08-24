@@ -450,6 +450,12 @@ export async function signAndSendTransaction(
     throw new Error("Wallet does not support transaction signing. Use Phantom or Solflare.");
   }
 
+  // Get FRESH blockhash right before signing to avoid expiration
+  const latestBlockhash = await connection.getLatestBlockhash();
+  const message = tx.message;
+  // @ts-ignore — versioned tx message is writable
+  message.recentBlockhash = latestBlockhash.blockhash;
+
   const signedTx = await walletAdapter.signTransaction(tx);
 
   const signature = await connection.sendRawTransaction(signedTx.serialize(), {
@@ -457,7 +463,6 @@ export async function signAndSendTransaction(
     maxRetries: 3,
   });
 
-  const latestBlockhash = await connection.getLatestBlockhash();
   await connection.confirmTransaction({
     signature,
     blockhash: latestBlockhash.blockhash,
