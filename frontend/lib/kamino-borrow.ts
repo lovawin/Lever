@@ -73,7 +73,7 @@ export async function kaminoDepositTx(
   wallet: string,
   amountSol: number,
 ): Promise<string> {
-  const res = await fetch(`${KAMINO_API}/ktx/klend/deposit`, {
+  const res = await fetch(`${KAMINO_API}/deposit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -105,7 +105,7 @@ export async function kaminoBorrowTx(
   // Find the USDC reserve in the main market
   const usdcReserve = await findUsdcReserve();
 
-  const res = await fetch(`${KAMINO_API}/ktx/klend/borrow`, {
+  const res = await fetch(`${KAMINO_API}/borrow`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
