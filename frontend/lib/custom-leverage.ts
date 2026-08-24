@@ -171,8 +171,8 @@ export async function openCustomLeveragePosition(
         `RPC rate-limited during Kamino setup. Use a private RPC (Helius/QuickNode) or retry.\n\nDetails: ${msg}`,
       );
     } else {
-      // Non-fatal — try to continue, obligation may already exist
-      steps.push(`⚠ Setup skipped: ${msg.slice(0, 120)}`);
+      // Setup failed for unknown reason — throw instead of continuing
+      throw new Error(`Kamino setup failed: ${msg}`);
     }
   }
 
