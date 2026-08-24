@@ -83,50 +83,114 @@ export interface LeverageResult {
   provider: LeverageProvider;
 }
 
-// ─── Token Search (DexScreener — CORS-enabled) ─────────────────────────────
+// ─── Token Search (DexScreener + Helius fallback) ──────────────────────────
+
+const HELIUS_RPC = process.env.NEXT_PUBLIC_SOL_RPC || "https://mainnet.helius-rpc.com/?api-key=48536776-14dd-4b89-ba1d-9e536ff385f6";
 
 export async function searchTokens(query: string): Promise<TokenSearchResult[]> {
   if (query.length < 2) return [];
 
-  const r = await fetch(
-    `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query)}`
-  );
-  if (!r.ok) return [];
+  // Try DexScreener first (has price/volume/liquidity data)
+  try {
+    const r = await fetch(
+      `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query)}`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (r.ok) {
+      const data = await r.json();
+      const pairs = data.pairs ?? [];
 
-  const data = await r.json();
-  const pairs = data.pairs ?? [];
+      const seen = new Set<string>();
+      const results: TokenSearchResult[] = [];
 
-  const seen = new Set<string>();
-  const results: TokenSearchResult[] = [];
+      for (const p of pairs) {
+        if (p.chainId !== "solana") continue;
 
-  for (const p of pairs) {
-    // Only include Solana pairs — this is a Solana feature
-    if (p.chainId !== "solana") continue;
+        const mint = p.baseToken?.address;
+        if (!mint || seen.has(mint)) continue;
+        seen.add(mint);
 
-    const mint = p.baseToken?.address;
-    if (!mint || seen.has(mint)) continue;
-    seen.add(mint);
+        results.push({
+          mint,
+          symbol: p.baseToken?.symbol ?? "???",
+          name: p.baseToken?.name ?? p.baseToken?.symbol ?? "Unknown",
+          logoUri: p.baseToken?.logoUri,
+          priceUsd: parseFloat(p.priceUsd ?? "0") || undefined,
+          volume24h: parseFloat(p.volume?.h24 ?? "0") || undefined,
+          liquidity: parseFloat(p.liquidity?.usd ?? "0") || undefined,
+        });
+      }
 
-    results.push({
-      mint,
-      symbol: p.baseToken?.symbol ?? "???",
-      name: p.baseToken?.name ?? p.baseToken?.symbol ?? "Unknown",
-      logoUri: p.baseToken?.logoUri,
-      priceUsd: parseFloat(p.priceUsd ?? "0") || undefined,
-      volume24h: parseFloat(p.volume?.h24 ?? "0") || undefined,
-      liquidity: parseFloat(p.liquidity?.usd ?? "0") || undefined,
-    });
+      results.sort((a, b) => (b.volume24h ?? 0) - (a.volume24h ?? 0));
+      if (results.length > 0) return results.slice(0, 20);
+    }
+  } catch {
+    // DexScreener down or timed out — fall through to Helius
   }
 
-  results.sort((a, b) => (b.volume24h ?? 0) - (a.volume24h ?? 0));
-  return results.slice(0, 20);
+  // Fallback: Helius DAS searchAssets for fungible tokens
+  try {
+    const r = await fetch(HELIUS_RPC, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "token-search",
+        method: "searchAssets",
+        params: {
+          tokenType: "fungible",
+          displayOptions: { showFungible: true },
+          paging: { limit: 20 },
+        },
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!r.ok) return [];
+
+    const data = await r.json();
+    const items = data.result?.items ?? [];
+
+    const seen = new Set<string>();
+    const results: TokenSearchResult[] = [];
+
+    const q = query.toLowerCase();
+
+    for (const item of items) {
+      const mint = item.id;
+      if (!mint || seen.has(mint)) continue;
+
+      const symbol = item.content?.metadata?.symbol ?? "";
+      const name = item.content?.metadata?.name ?? "";
+
+      // Filter by query match on symbol or name
+      if (!symbol.toLowerCase().includes(q) && !name.toLowerCase().includes(q)) continue;
+
+      seen.add(mint);
+      results.push({
+        mint,
+        symbol: symbol || "???",
+        name: name || symbol || "Unknown",
+        logoUri: item.content?.links?.image,
+        priceUsd: item.token_info?.price_info?.price
+          ? parseFloat(item.token_info.price_info.price) || undefined
+          : undefined,
+      });
+    }
+
+    return results.slice(0, 20);
+  } catch {
+    return [];
+  }
 }
 
 // ─── SOL Price Helper ──────────────────────────────────────────────────────
 
 export async function getSolPrice(): Promise<number> {
   try {
-    const r = await fetch("https://api.dexscreener.com/latest/dex/search?q=SOL");
+    const r = await fetch("https://api.dexscreener.com/latest/dex/search?q=SOL", {
+      signal: AbortSignal.timeout(5000),
+    });
     if (r.ok) {
       const data = await r.json();
       const pairs = data.pairs ?? [];
