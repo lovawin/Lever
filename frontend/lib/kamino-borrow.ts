@@ -23,7 +23,7 @@ import {
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 
-const KAMINO_API = "/kamino";
+const KAMINO_API = "/api/kamino";
 const KAMINO_MAIN_MARKET = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF";
 const KAMINO_SOL_RESERVE = "d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q";
 const KAMINO_USDC_RESERVE = "GKvV3NffWTfLDXyqDz3w5q9r3pJz6f2m3N4bTSU2Ze8P6Bc4Q"; // placeholder, will look up
@@ -134,7 +134,7 @@ let cachedUsdcReserve: string | null = null;
 async function findUsdcReserve(): Promise<string> {
   if (cachedUsdcReserve) return cachedUsdcReserve;
 
-  const res = await fetch(`${KAMINO_API}/v2/kamino-market/${KAMINO_MAIN_MARKET}/reserves`, {
+  const res = await fetch(`${KAMINO_API}/reserves?market=${KAMINO_MAIN_MARKET}`, {
     signal: abortWithTimeout(10000),
   });
 

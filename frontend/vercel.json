@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "regions": ["iad1"],
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://lever-signals.onrender.com/:path*" },
-    { "source": "/kamino/:path*", "destination": "https://api.kamino.finance/:path*" }
+    { "source": "/api/kamino/:path*", "destination": "/api/kamino/:path*" },
+    { "source": "/api/:path*", "destination": "https://lever-signals.onrender.com/:path*" }
   ]
 }
