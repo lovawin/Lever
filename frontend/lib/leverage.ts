@@ -42,7 +42,7 @@ const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1";
 const JUPITER_API_KEY = process.env.NEXT_PUBLIC_JUPITER_API_KEY || "";
 
 // Known Kamino markets — SOL collateral + USDC debt pairs
-const KAMINO_MARKETS: Record<string, { address: string; name: string }> = {
+export const KAMINO_MARKETS: Record<string, { address: string; name: string }> = {
   main:       { address: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF", name: "SOL/BTC Market" },
   altcoins:   { address: "ByYiZxp8QrdN9qbdtaAiePN8AAr3qvTPppNJDpf5DVJ5", name: "Altcoins Market" },
   pump:       { address: "J21qWrb66pvEYhk24P98JYNHamxGFDcGZB4pYuSuMCBr", name: "PUMP Market" },
