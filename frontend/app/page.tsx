@@ -30,6 +30,11 @@ import {
   type CustomLeverageEstimate,
 } from "@/lib/custom-leverage";
 import {
+  openBorrowLeveragePosition,
+  estimateBorrowLeverage,
+  type BorrowLeverageResult,
+} from "@/lib/kamino-borrow";
+import {
   generateSolanaWallet,
   getStoredSolanaWallet,
   bridgeEvmToSolana,
@@ -484,8 +489,8 @@ function SpotLeveragePanel({
         console.warn("Gas swap failed:", gasErr?.message);
       }
 
-      // Run the custom leverage engine
-      const leverageResult = await openCustomLeveragePosition({
+      // Run the borrow leverage engine
+      const leverageResult = await openBorrowLeveragePosition({
         walletAddress: autoSolWallet,
         walletAdapter: mockWalletAdapter,
         connection,
@@ -522,7 +527,7 @@ function SpotLeveragePanel({
     setResult(null);
 
     try {
-      const res = await openCustomLeveragePosition({
+      const res = await openBorrowLeveragePosition({
         walletAddress: publicKey.toBase58(),
         walletAdapter: wallet.adapter,
         connection,
