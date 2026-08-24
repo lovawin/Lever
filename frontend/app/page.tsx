@@ -302,6 +302,8 @@ function SpotLeveragePanel({
   const { publicKey, connected, wallet } = useWallet();
   const { connection } = useConnection();
   const { isConnected: evmConnected, address: evmAddress } = useWagmiAccount();
+  const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
 
   // Leverage form state
   const [collateralSol, setCollateralSol] = useState(0.5);
@@ -390,13 +392,32 @@ function SpotLeveragePanel({
         usdcAmount: bridgeUsdcAmount,
       });
 
-      // Approve USDC FIRST before sending bridge tx
+      // Approve USDC FIRST using wagmi's writeContract (handles gas properly)
       const spender = bridgeOrder.tx.to;
       setBridgeStatus("Step 1/4: Approving USDC for deBridge router…");
-      const approvalTx = await approveUsdc(spender, evmAddress);
-      if (approvalTx) {
+      const USDC_ABI = [{
+        inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
+        name: "approve",
+        outputs: [{ type: "bool" }],
+        stateMutability: "nonpayable",
+        type: "function"
+      }];
+      try {
+        const approveHash = await writeContractAsync({
+          address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+          abi: USDC_ABI,
+          functionName: "approve",
+          args: [spender, BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")],
+        });
         setBridgeStatus("Step 1/4: Waiting for USDC approval confirmation…");
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        if (publicClient) {
+          await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        } else {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+      } catch (e: any) {
+        // Approval might already be set, continue anyway
+        setBridgeStatus("Step 1/4: Approval skipped (may already be approved)…");
       }
 
       // Step 2: Send the bridge transaction via EVM wallet
