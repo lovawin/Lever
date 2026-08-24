@@ -83,9 +83,7 @@ export interface LeverageResult {
   provider: LeverageProvider;
 }
 
-// ─── Token Search (DexScreener + Helius fallback) ──────────────────────────
-
-const HELIUS_RPC = process.env.NEXT_PUBLIC_SOL_RPC || "https://mainnet.helius-rpc.com/?api-key=48536776-14dd-4b89-ba1d-9e536ff385f6";
+// ─── Token Search (DexScreener + Jupiter fallback) ─────────────────────────
 
 export async function searchTokens(query: string): Promise<TokenSearchResult[]> {
   if (query.length < 2) return [];
@@ -125,60 +123,30 @@ export async function searchTokens(query: string): Promise<TokenSearchResult[]> 
       if (results.length > 0) return results.slice(0, 20);
     }
   } catch {
-    // DexScreener down or timed out — fall through to Helius
+    // DexScreener down or timed out — fall through to Jupiter
   }
 
-  // Fallback: Helius DAS searchAssets for fungible tokens
+  // Fallback: Jupiter token search API
   try {
-    const r = await fetch(HELIUS_RPC, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "token-search",
-        method: "searchAssets",
-        params: {
-          tokenType: "fungible",
-          displayOptions: { showFungible: true },
-          paging: { limit: 20 },
-        },
-      }),
-      signal: AbortSignal.timeout(8000),
-    });
-
+    const r = await fetch(
+      `https://lite-api.jup.ag/tokens/v2/search?query=${encodeURIComponent(query)}`,
+      { signal: AbortSignal.timeout(8000) }
+    );
     if (!r.ok) return [];
 
-    const data = await r.json();
-    const items = data.result?.items ?? [];
+    const items = await r.json();
+    if (!Array.isArray(items)) return [];
 
-    const seen = new Set<string>();
-    const results: TokenSearchResult[] = [];
+    const results: TokenSearchResult[] = items.slice(0, 20).map((item: any) => ({
+      mint: item.id,
+      symbol: item.symbol ?? "???",
+      name: item.name ?? item.symbol ?? "Unknown",
+      logoUri: item.icon,
+      priceUsd: item.usdPrice ? parseFloat(item.usdPrice) || undefined : undefined,
+      liquidity: item.liquidity ? parseFloat(item.liquidity) || undefined : undefined,
+    }));
 
-    const q = query.toLowerCase();
-
-    for (const item of items) {
-      const mint = item.id;
-      if (!mint || seen.has(mint)) continue;
-
-      const symbol = item.content?.metadata?.symbol ?? "";
-      const name = item.content?.metadata?.name ?? "";
-
-      // Filter by query match on symbol or name
-      if (!symbol.toLowerCase().includes(q) && !name.toLowerCase().includes(q)) continue;
-
-      seen.add(mint);
-      results.push({
-        mint,
-        symbol: symbol || "???",
-        name: name || symbol || "Unknown",
-        logoUri: item.content?.links?.image,
-        priceUsd: item.token_info?.price_info?.price
-          ? parseFloat(item.token_info.price_info.price) || undefined
-          : undefined,
-      });
-    }
-
-    return results.slice(0, 20);
+    return results;
   } catch {
     return [];
   }
