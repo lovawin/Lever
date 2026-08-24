@@ -23,7 +23,7 @@ import {
 export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 
-const KAMINO_API = "/kamino-api";
+const KAMINO_API = "/api/kamino";
 const KAMINO_MAIN_MARKET = "7WQeTuLsFrZsgnHW7ddFdNfhfJAViqH4mvcFZPQ5zuQ9";
 const KAMINO_SOL_RESERVE = "7aTmE2S2ugkPqQyeb8p3sHjKaxdYtQSyakejWdNWkU2w";
 const KAMINO_USDC_RESERVE = "GKvV3NffWTfLDXyqDz3w5q9r3pJz6f2m3N4bTSU2Ze8P6Bc4Q"; // placeholder, will look up

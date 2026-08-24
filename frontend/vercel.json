@@ -1,11 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "regions": ["iad1"],
-  "rewrites": [
-    { "source": "/kamino-api/deposit", "destination": "https://api.kamino.finance/ktx/klend/deposit" },
-    { "source": "/kamino-api/borrow", "destination": "https://api.kamino.finance/ktx/klend/borrow" },
-    { "source": "/kamino-api/reserves", "destination": "https://api.kamino.finance/v2/kamino-market/7WQeTuLsFrZsgnHW7ddFdNfhfJAViqH4mvcFZPQ5zuQ9/reserves" },
-    { "source": "/api/:path*", "destination": "https://lever-signals.onrender.com/:path*" }
-  ]
+  "regions": ["iad1"]
 }
