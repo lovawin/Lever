@@ -624,7 +624,20 @@ export async function approveUsdc(
   // approve(address spender, uint256 amount) = 0x095ea7b3
   // Approve max uint256 for convenience
   const maxUint256 = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-  const approveData = "0x095ea7b3" + spender.slice(2).padStart(64, "0") + maxUint256;
+  const spenderPadded = spender.toLowerCase().slice(2).padStart(64, "0");
+  const approveData = "0x095ea7b3" + spenderPadded + maxUint256;
+
+  // Estimate gas first to avoid UNPREDICTABLE_GAS_LIMIT
+  let gasLimit = "0x100000"; // default 1M gas
+  try {
+    const estimate = await ethereum.request({
+      method: "eth_estimateGas",
+      params: [{ from: fromAddress, to: USDC_ARBITRUM, data: approveData }],
+    });
+    if (estimate) gasLimit = estimate;
+  } catch {
+    // Keep default if estimation fails
+  }
 
   const txHash: string = await ethereum.request({
     method: "eth_sendTransaction",
@@ -632,6 +645,7 @@ export async function approveUsdc(
       from: fromAddress,
       to: USDC_ARBITRUM,
       data: approveData,
+      gasLimit,
     }],
   });
 
