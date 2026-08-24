@@ -30,7 +30,7 @@ const wagmiConfig = getDefaultConfig({
   ssr: true,
 });
 
-const SOL_ENDPOINT = clusterApiUrl("mainnet-beta");
+const SOL_ENDPOINT = process.env.NEXT_PUBLIC_SOL_RPC || "https://mainnet.helius-rpc.com/?api-key=48536776-14dd-4b89-ba1d-9e536ff385f6";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
