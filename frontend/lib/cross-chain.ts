@@ -333,7 +333,7 @@ export async function bridgeEvmToSolana(
   url.searchParams.set("srcChainOrderAuthorityAddress", evmAddress);
   url.searchParams.set("dstChainOrderAuthorityAddress", solanaRecipient);
   url.searchParams.set("prependOperatingExpense", "true");
-  url.searchParams.set("enableEstimate", "true");
+  url.searchParams.set("enableEstimate", "false");
   url.searchParams.set("senderAddress", evmAddress);
 
   const r = await fetch(url.toString(), {
