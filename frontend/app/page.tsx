@@ -382,7 +382,7 @@ function SpotLeveragePanel({
     setBridgeStatus("Step 1/4: Checking USDC approval for deBridge router…");
 
     try {
-      // Step 1: Create the bridge order via deBridge API
+      // Step 1: Create the bridge order via deBridge API (enableEstimate=false so it doesn't check balance)
       setBridgeStatus("Step 1/4: Creating deBridge order (Arbitrum → Solana)…");
       const bridgeOrder = await bridgeEvmToSolana({
         evmAddress,
@@ -390,13 +390,12 @@ function SpotLeveragePanel({
         usdcAmount: bridgeUsdcAmount,
       });
 
-      // Check if we need to approve USDC first
+      // Approve USDC FIRST before sending bridge tx
       const spender = bridgeOrder.tx.to;
       setBridgeStatus("Step 1/4: Approving USDC for deBridge router…");
       const approvalTx = await approveUsdc(spender, evmAddress);
       if (approvalTx) {
         setBridgeStatus("Step 1/4: Waiting for USDC approval confirmation…");
-        // Wait for approval to be mined (poll for a few seconds)
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
 
