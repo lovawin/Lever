@@ -324,6 +324,22 @@ export default function DocsPage() {
               </p>
             </div>
 
+            <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-4 mb-6">
+              <p className="text-sm font-bold text-blue-400 mb-2">🌉 Cross-Chain Bridge for EVM Users</p>
+              <p className="text-xs text-white/50 mb-3">
+                Don&apos;t have a Solana wallet? No problem. If you have MetaMask, Rainbow, or any EVM wallet with USDC on Arbitrum, you can still use Spot Leverage.
+              </p>
+              <div className="space-y-2 text-xs text-white/60 font-mono">
+                <div>1. We auto-generate a Solana wallet for you (encrypted in your browser)</div>
+                <div>2. You bridge USDC from Arbitrum → Solana via deBridge</div>
+                <div>3. Once bridged, we swap USDC → SOL and run the leverage engine</div>
+                <div>4. You get a leveraged memecoin position without ever leaving your EVM wallet</div>
+              </div>
+              <p className="text-xs text-white/30 mt-3">
+                Powered by deBridge DLN protocol. Your Solana private key is generated client-side and encrypted with AES-GCM in your browser&apos;s localStorage. Only you can access it.
+              </p>
+            </div>
+
             <h3 className="text-lg font-bold mb-2 text-yellow-400">⚡ Flash Loans — Coming Soon</h3>
             <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4 font-mono text-xs text-white/60">
               <div className="text-yellow-400 font-bold mb-2 text-sm font-sans">Flash Loan Mode</div>
