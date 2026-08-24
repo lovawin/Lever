@@ -83,6 +83,13 @@ export interface LeverageResult {
   provider: LeverageProvider;
 }
 
+// Abort helper that works in all browsers
+function abortWithTimeout(ms: number): AbortSignal {
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), ms);
+  return ctrl.signal;
+}
+
 // ─── Token Search (DexScreener + Jupiter fallback) ─────────────────────────
 
 export async function searchTokens(query: string): Promise<TokenSearchResult[]> {
@@ -92,7 +99,7 @@ export async function searchTokens(query: string): Promise<TokenSearchResult[]> 
   try {
     const r = await fetch(
       `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query)}`,
-      { signal: AbortSignal.timeout(5000) }
+      { signal: abortWithTimeout(5000) }
     );
     if (r.ok) {
       const data = await r.json();
@@ -130,7 +137,7 @@ export async function searchTokens(query: string): Promise<TokenSearchResult[]> 
   try {
     const r = await fetch(
       `https://lite-api.jup.ag/tokens/v2/search?query=${encodeURIComponent(query)}`,
-      { signal: AbortSignal.timeout(8000) }
+      { signal: abortWithTimeout(8000) }
     );
     if (!r.ok) return [];
 
@@ -157,7 +164,7 @@ export async function searchTokens(query: string): Promise<TokenSearchResult[]> 
 export async function getSolPrice(): Promise<number> {
   try {
     const r = await fetch("https://api.dexscreener.com/latest/dex/search?q=SOL", {
-      signal: AbortSignal.timeout(5000),
+      signal: abortWithTimeout(5000),
     });
     if (r.ok) {
       const data = await r.json();
