@@ -148,14 +148,26 @@ async function findUsdcReserve(): Promise<string> {
   const data = await res.json();
   const reserves = data.reserves ?? data ?? [];
 
+  // Find the USDC reserve with the most available liquidity
+  let bestReserve: string | null = null;
+  let bestAvailable = -1;
   for (const r of reserves) {
     const mint = r.liquidity?.mint ?? r.mint ?? r.liquidityTokenMint;
     if (mint && mint.toLowerCase() === USDC_MINT.toLowerCase()) {
       const address = r.address ?? r.pubkey ?? r.reserve;
-      if (!address) break;
-      cachedUsdcReserve = address;
-      return address;
+      if (!address) continue;
+      const supply = parseFloat(r.totalSupplyUsd ?? "0");
+      const borrow = parseFloat(r.totalBorrowUsd ?? "0");
+      const available = supply - borrow;
+      if (available > bestAvailable) {
+        bestAvailable = available;
+        bestReserve = address;
+      }
     }
+  }
+  if (bestReserve) {
+    cachedUsdcReserve = bestReserve;
+    return bestReserve;
   }
 
   throw new Error("Could not find a USDC reserve on the Kamino main market. Try again shortly.");
