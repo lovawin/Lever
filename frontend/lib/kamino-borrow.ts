@@ -149,9 +149,9 @@ async function findUsdcReserve(): Promise<string> {
   const reserves = data.reserves ?? data ?? [];
 
   for (const r of reserves) {
-    const mint = r.liquidity?.mint ?? r.mint;
+    const mint = r.liquidity?.mint ?? r.mint ?? r.liquidityTokenMint;
     if (mint && mint.toLowerCase() === USDC_MINT.toLowerCase()) {
-      const address = r.address ?? r.pubkey;
+      const address = r.address ?? r.pubkey ?? r.reserve;
       if (!address) break;
       cachedUsdcReserve = address;
       return address;
