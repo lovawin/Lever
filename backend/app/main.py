@@ -87,6 +87,18 @@ HL_PRIVATE_KEY = os.getenv("HL_PRIVATE_KEY", "")
 SOL_TREASURY = os.getenv("SOL_TREASURY", "")
 SESSION_EXPIRY_SECONDS = int(os.getenv("SESSION_EXPIRY_SECONDS", "86400"))
 
+# ─── Flash Loans — hard kill switch ─────────────────────────────────────────
+# Flash loans are disabled platform-wide. This is intentionally NOT env-driven
+# so a misconfigured .env can't silently re-enable it. Flip to True (and restore
+# env-based gating in flash_loan.py) to bring the feature back.
+FLASH_LOANS_ENABLED = False
+
+
+def require_flash_loans_enabled():
+    if not FLASH_LOANS_ENABLED:
+        raise HTTPException(503, "Flash loans are currently disabled.")
+
+
 # ─── Fee Schedule ────────────────────────────────────────────────────────────
 
 FEE_TIERS = {
@@ -902,14 +914,14 @@ class FlashLoanQuoteResponse(BaseModel):
     referrer_fee_usd: float = 0
 
 
-@app.get("/api/flash-loan/status")
+@app.get("/api/flash-loan/status", dependencies=[Depends(require_flash_loans_enabled)])
 async def flash_loan_status():
     """Flash loan engine status and stats."""
     engine = get_flash_loan_engine()
     return engine.get_stats()
 
 
-@app.post("/api/flash-loan/quote", response_model=FlashLoanQuoteResponse)
+@app.post("/api/flash-loan/quote", response_model=FlashLoanQuoteResponse, dependencies=[Depends(require_flash_loans_enabled)])
 async def flash_loan_quote(req: FlashLoanQuoteRequest, user: dict = Depends(get_current_user)):
     """Estimate flash loan costs without executing. Shows fee breakdown."""
     engine = get_flash_loan_engine()
@@ -935,7 +947,7 @@ async def flash_loan_quote(req: FlashLoanQuoteRequest, user: dict = Depends(get_
     )
 
 
-@app.post("/api/flash-loan/execute")
+@app.post("/api/flash-loan/execute", dependencies=[Depends(require_flash_loans_enabled)])
 @limiter.limit("5/minute")
 async def flash_loan_execute(request: Request, req: FlashLoanRequest, user: dict = Depends(get_current_user)):
     """Execute a flash loan. Requires FLASH_LOAN_ENABLED=true."""
@@ -992,7 +1004,7 @@ async def flash_loan_execute(request: Request, req: FlashLoanRequest, user: dict
     }
 
 
-@app.get("/api/flash-loan/history")
+@app.get("/api/flash-loan/history", dependencies=[Depends(require_flash_loans_enabled)])
 async def flash_loan_history(limit: int = 20, user: dict = Depends(get_current_user)):
     """Get recent flash loan execution history."""
     engine = get_flash_loan_engine()
@@ -1007,7 +1019,7 @@ class ArbScanRequest(BaseModel):
     min_spread_bps: float = Field(default=100, description="Min spread in bps to report")
 
 
-@app.post("/api/flash-loan/scan")
+@app.post("/api/flash-loan/scan", dependencies=[Depends(require_flash_loans_enabled)])
 async def scan_arbitrage(req: ArbScanRequest, user: dict = Depends(get_current_user)):
     """Scan for arbitrage opportunities for a token across DEXs."""
     oracle = get_price_oracle()
@@ -1039,7 +1051,7 @@ async def scan_arbitrage(req: ArbScanRequest, user: dict = Depends(get_current_u
     }
 
 
-@app.get("/api/flash-loan/prices/{token}")
+@app.get("/api/flash-loan/prices/{token}", dependencies=[Depends(require_flash_loans_enabled)])
 async def get_token_prices(token: str, amount: float = 1000.0, user: dict = Depends(get_current_user)):
     """Get current prices for a token across all DEXs on Arbitrum."""
     oracle = get_price_oracle()
@@ -1059,7 +1071,7 @@ async def get_token_prices(token: str, amount: float = 1000.0, user: dict = Depe
     }
 
 
-@app.get("/api/flash-loan/fee-tiers")
+@app.get("/api/flash-loan/fee-tiers", dependencies=[Depends(require_flash_loans_enabled)])
 async def get_flash_loan_fee_tiers():
     """Show all flash loan fee tiers."""
     from .flash_loan import FLASH_LOAN_FEE_TIERS, LEVER_FLASH_LOAN_FEE_BPS, AAVE_FLASH_LOAN_FEE_BPS
@@ -1080,7 +1092,7 @@ async def get_flash_loan_fee_tiers():
     return tiers
 
 
-@app.post("/api/flash-loan/simulate")
+@app.post("/api/flash-loan/simulate", dependencies=[Depends(require_flash_loans_enabled)])
 async def simulate_flash_loan(
     strategy: str = "arbitrage",
     amount_usd: float = 10000.0,
@@ -1188,6 +1200,7 @@ def health():
             "signature_verification": True,
             "input_validation": True,
             "session_expiry_seconds": SESSION_EXPIRY_SECONDS,
+            "flash_loans_enabled": FLASH_LOANS_ENABLED,
         },
     }
 

@@ -46,7 +46,7 @@ import {
 import { useAccount as useWagmiAccount, useWriteContract, usePublicClient } from "wagmi";
 
 export default function Page() {
-  const [tab, setTab] = useState<"perps" | "leverage" | "flash">("perps");
+  const [tab, setTab] = useState<"perps" | "leverage">("perps");
   const [selectedCoin, setSelectedCoin] = useState("PURR");
   const [mids, setMids] = useState<Record<string, string>>({});
 
@@ -134,16 +134,6 @@ export default function Page() {
           >
             🌀 Spot Leverage
           </button>
-          <button
-            onClick={() => setTab("flash")}
-            className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 ${
-              tab === "flash"
-                ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
-                : "text-muted hover:text-white hover:bg-white/5 border border-transparent"
-            }`}
-          >
-            💎 Flash Loans
-          </button>
         </div>
       </div>
 
@@ -194,28 +184,13 @@ export default function Page() {
               />
             </div>
           </div>
-        ) : (
-          <div className="mx-auto max-w-[680px]">
-            <div className="glass rounded-2xl p-5">
-              <div className="text-center py-16">
-                <div className="text-5xl mb-4">💎</div>
-                <h2 className="text-xl font-black mb-2">Flash Loans</h2>
-                <p className="text-sm text-muted max-w-sm mx-auto">
-                  Atomic flash loan strategies on Arbitrum — arbitrage, self-liquidation, and leverage loops. Powered by Aave v3.
-                </p>
-                <div className="mt-4 inline-block px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-muted">
-                  🔄 Coming Soon
-                </div>
-              </div>
-            </div>
-          </div>
         )}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-white/5">
         <div className="mx-auto max-w-[1100px] px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-          <span>Perps · Spot Leverage · Flash Loans — memecoin-native leverage</span>
+          <span>Perps · Spot Leverage — memecoin-native leverage</span>
           <span>Lever Protocol</span>
         </div>
       </footer>

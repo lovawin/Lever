@@ -529,14 +529,24 @@ export async function signAndSendBase58Tx(
     throw new Error("Wallet does not support transaction signing. Use Phantom or Solflare.");
   }
 
+  // Refresh the blockhash right before signing. The tx as built by the
+  // server can carry a blockhash that's already stale by the time the user
+  // approves it in their wallet (wallet popups routinely take 5-30s), which
+  // used to cause the transaction to be silently dropped on-chain — signing
+  // and sending would appear to succeed but the tx would never land.
+  const latestBlockhash = await connection.getLatestBlockhash();
+  // @ts-ignore — VersionedMessage has writable recentBlockhash
+  tx.message.recentBlockhash = latestBlockhash.blockhash;
+
   const signedTx = await walletAdapter.signTransaction(tx);
 
   const signature = await connection.sendRawTransaction(signedTx.serialize(), {
-    skipPreflight: true,
+    skipPreflight: false,
     maxRetries: 3,
+    preflightCommitment: "confirmed",
   });
 
-  const latestBlockhash = await connection.getLatestBlockhash();
+  const confirmedBlockhash = await connection.getLatestBlockhash();
   await connection.confirmTransaction({
     signature,
     blockhash: latestBlockhash.blockhash,
