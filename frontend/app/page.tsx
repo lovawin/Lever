@@ -411,8 +411,8 @@ function SpotLeveragePanel({
         },
       });
 
-      // Step 4: USDC has landed directly in the user's own Solana wallet.
-      // Convert some to SOL via Jupiter for gas, then run the leverage engine.
+      // Step 4: Now we have USDC on the auto-generated Solana wallet.
+      // Convert USDC → SOL via Jupiter, then run the leverage engine.
       setBridgeStep("leveraging");
       setBridgeStatus("Step 4/4: USDC received on Solana! Running leverage engine…");
 
@@ -420,7 +420,7 @@ function SpotLeveragePanel({
       const currentSolPrice = solPrice ?? (await getSolPrice());
       const collateralSolFromBridge = bridgeUsdcAmount / currentSolPrice;
 
-      // Swap ~$3 of USDC → SOL for gas fees, in case the wallet is new/empty
+      // Swap ~$3 of USDC → SOL for gas fees (auto wallet has no SOL)
       setBridgeStatus("Step 4/4: Swapping USDC → SOL for gas…");
       const gasUsdcRaw = usdcToRaw(3); // $3 USDC for gas
       try {
@@ -433,7 +433,7 @@ function SpotLeveragePanel({
         const gasSwapTx = await getJupiterSwapTx(gasQuote, solRecipient, 300);
         await signAndSendTransaction(gasSwapTx, solAdapter, connection);
       } catch (gasErr: any) {
-        // Gas swap might fail if insufficient USDC — continue anyway, wallet may already have SOL
+        // Gas swap might fail if insufficient USDC — continue anyway, maybe wallet has some SOL
         console.warn("Gas swap failed:", gasErr?.message);
       }
 
