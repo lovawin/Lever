@@ -427,3 +427,47 @@ export function estimateBorrowLeverage(
     solPrice,
   };
 }
+
+// ─── Fetch User Obligations ────────────────────────────────────────────────
+
+export interface KaminoObligation {
+  obligationAddress: string;
+  deposits: {
+    depositReserve: string;
+    depositedAmount: string;
+    marketValueSf: string;
+  }[];
+  borrows: {
+    borrowReserve: string;
+    borrowedAmount: string;
+    marketValueSf: string;
+  }[];
+  healthFactor: number;
+  borrowedValueUsd: number;
+  collateralValueUsd: number;
+}
+
+export async function getUserObligations(
+  walletAddress: string,
+): Promise<KaminoObligation[]> {
+  const res = await fetch(
+    `https://api.kamino.finance/kamino-market/${KAMINO_MAIN_MARKET}/users/${walletAddress}/obligations`,
+    { signal: abortWithTimeout(10000) },
+  );
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch obligations (${res.status})`);
+  }
+
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+
+  return data.map((o: any) => ({
+    obligationAddress: o.obligationAddress,
+    deposits: (o.state?.deposits ?? []).filter((d: any) => d.depositedAmount !== "0"),
+    borrows: (o.state?.borrows ?? []).filter((b: any) => b.borrowedAmount !== "0"),
+    healthFactor: o.stats?.healthFactor ?? 0,
+    borrowedValueUsd: o.stats?.borrowedValueUsd ?? 0,
+    collateralValueUsd: o.stats?.collateralValueUsd ?? 0,
+  }));
+}

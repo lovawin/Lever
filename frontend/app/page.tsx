@@ -32,7 +32,9 @@ import {
 import {
   openBorrowLeveragePosition,
   estimateBorrowLeverage,
+  getUserObligations,
   type BorrowLeverageResult,
+  type KaminoObligation,
 } from "@/lib/kamino-borrow";
 import {
   generateSolanaWallet,
@@ -326,6 +328,7 @@ function SpotLeveragePanel({
   const [error, setError] = useState<string | null>(null);
   const [solPrice, setSolPrice] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [obligations, setObligations] = useState<KaminoObligation[]>([]);
 
   // ─── Cross-chain bridge state ─────────────────────────────────────
   const [autoSolWallet, setAutoSolWallet] = useState<string | null>(null);
@@ -365,6 +368,24 @@ function SpotLeveragePanel({
     setBridgeStep("idle");
     setBridgeError(null);
   }, [selectedToken?.mint]);
+
+  // Fetch user's Kamino obligations
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setObligations([]);
+      return;
+    }
+    let alive = true;
+    getUserObligations(publicKey.toBase58())
+      .then(obs => { if (alive) setObligations(obs); })
+      .catch(() => { if (alive) setObligations([]); });
+    const iv = setInterval(() => {
+      getUserObligations(publicKey.toBase58())
+        .then(obs => { if (alive) setObligations(obs); })
+        .catch(() => {});
+    }, 15000); // refresh every 15s
+    return () => { alive = false; clearInterval(iv); };
+  }, [connected, publicKey, result]);
 
   // Calculate estimate — use bridged USDC for EVM users, SOL collateral for Solana users
   const effectiveCollateralSol = isEvmOnly && solPrice && bridgeUsdcAmount > 0
@@ -950,6 +971,48 @@ function SpotLeveragePanel({
               <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-400">
                 <div className="font-bold mb-1">❌ Error</div>
                 <div className="font-mono text-[11px] whitespace-pre-wrap">{error}</div>
+              </div>
+            )}
+
+            {/* ── Your Kamino Positions ── */}
+            {connected && obligations.length > 0 && (
+              <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 space-y-2">
+                <div className="text-xs font-bold text-white flex items-center gap-2">
+                  📊 Your Leverage Positions
+                  <span className="text-[10px] text-muted font-normal">({obligations.length})</span>
+                </div>
+                {obligations.map((obs, i) => (
+                  <div key={i} className="bg-white/[0.02] rounded-lg p-2.5 space-y-1.5">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-muted">Collateral</span>
+                      <span className="font-mono text-green-400">${obs.collateralValueUsd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-muted">Borrowed</span>
+                      <span className="font-mono text-red-400">${obs.borrowedValueUsd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-muted">Health Factor</span>
+                      <span className={`font-mono ${obs.healthFactor > 2 ? "text-green-400" : obs.healthFactor > 1.2 ? "text-yellow-400" : "text-red-400"}`}>
+                        {obs.healthFactor.toFixed(2)}
+                      </span>
+                    </div>
+                    {obs.deposits.map((d, j) => (
+                      <div key={j} className="flex justify-between text-[10px] text-muted">
+                        <span>Deposit #{j + 1}</span>
+                        <span className="font-mono truncate max-w-[200px]">{d.depositReserve.slice(0, 8)}…</span>
+                      </div>
+                    ))}
+                    <a
+                      href={`https://kamino.com/borrow/obligation/${obs.obligationAddress}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-center text-[10px] text-blue-400 hover:text-blue-300 pt-1"
+                    >
+                      View on Kamino ↗
+                    </a>
+                  </div>
+                ))}
               </div>
             )}
 
