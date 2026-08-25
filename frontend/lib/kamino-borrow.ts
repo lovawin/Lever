@@ -24,9 +24,11 @@ export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 const KAMINO_API = "/api/kamino";
-const KAMINO_MAIN_MARKET = "7WQeTuLsFrZsgnHW7ddFdNfhfJAViqH4mvcFZPQ5zuQ9";
-const KAMINO_SOL_RESERVE = "7aTmE2S2ugkPqQyeb8p3sHjKaxdYtQSyakejWdNWkU2w";
-const KAMINO_USDC_RESERVE = "GKvV3NffWTfLDXyqDz3w5q9r3pJz6f2m3N4bTSU2Ze8P6Bc4Q"; // placeholder, will look up
+// Kamino Main Market (verified against Kamino docs / klend-sdk — this is the
+// real "Main Market" address, NOT the Bonk isolated market).
+const KAMINO_MAIN_MARKET = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF";
+// SOL reserve on the Main Market (verified: kamino.com/borrow/reserve/<market>/<reserve>).
+const KAMINO_SOL_RESERVE = "d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q";
 
 const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1";
 const JUPITER_API_KEY = process.env.NEXT_PUBLIC_JUPITER_API_KEY || "";
@@ -129,7 +131,7 @@ export async function kaminoBorrowTx(
 /**
  * Find the USDC reserve address in the Kamino main market.
  */
-let cachedUsdcReserve: string | null = "2187ciVuR8fScuGkQYJBtgTjgXFjdKNefafxUSvHjh2T";
+let cachedUsdcReserve: string | null = null;
 
 async function findUsdcReserve(): Promise<string> {
   if (cachedUsdcReserve) return cachedUsdcReserve;
@@ -139,8 +141,8 @@ async function findUsdcReserve(): Promise<string> {
   });
 
   if (!res.ok) {
-    // Fallback to known USDC reserve on main market
-    return "2187ciVuR8fScuGkQYJBtgTjgXFjdKNefafxUSvHjh2T";
+    const err = await res.text();
+    throw new Error(`Failed to look up Kamino USDC reserve (${res.status}): ${err}`);
   }
 
   const data = await res.json();
@@ -149,13 +151,14 @@ async function findUsdcReserve(): Promise<string> {
   for (const r of reserves) {
     const mint = r.liquidity?.mint ?? r.mint;
     if (mint && mint.toLowerCase() === USDC_MINT.toLowerCase()) {
-      cachedUsdcReserve = r.address ?? r.pubkey;
-      return cachedUsdcReserve;
+      const address = r.address ?? r.pubkey;
+      if (!address) break;
+      cachedUsdcReserve = address;
+      return address;
     }
   }
 
-  // Fallback
-  return "2187ciVuR8fScuGkQYJBtgTjgXFjdKNefafxUSvHjh2T";
+  throw new Error("Could not find a USDC reserve on the Kamino main market. Try again shortly.");
 }
 
 // ─── Jupiter Swap ──────────────────────────────────────────────────────────
