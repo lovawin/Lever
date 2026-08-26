@@ -451,7 +451,7 @@ export async function getUserObligations(
   walletAddress: string,
 ): Promise<KaminoObligation[]> {
   const res = await fetch(
-    `https://api.kamino.finance/kamino-market/${KAMINO_MAIN_MARKET}/users/${walletAddress}/obligations`,
+    `${KAMINO_API}/obligations?market=${KAMINO_MAIN_MARKET}&wallet=${walletAddress}`,
     { signal: abortWithTimeout(10000) },
   );
 
