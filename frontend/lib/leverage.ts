@@ -33,6 +33,7 @@ export const LAVARAGE_API_KEY = process.env.NEXT_PUBLIC_LAVARAGE_API_KEY || "";
 
 // Kamino Dialect (Blinks) API — CORS-enabled, returns signed transactions
 const KAMINO_DIALECT_API = "https://kamino.dial.to/api";
+const KAMINO_API = "/api/kamino"; // our own proxy, avoids CORS on api.kamino.finance
 // Kamino REST API — market metadata
 const KAMINO_REST_API = "https://api.kamino.finance";
 
@@ -778,4 +779,57 @@ export async function openLeveragePosition(params: OpenLeveragePositionParams): 
     error.signatures = signatures;
     throw error;
   }
+}
+export interface KaminoRepayParams {
+  wallet: string;
+  market?: string;
+  reserve: string;
+  amount: number;
+}
+
+export async function kaminoRepay(params: KaminoRepayParams): Promise<string> {
+  const market = params.market ?? KAMINO_MARKETS.main.address;
+  const r = await fetch(`${KAMINO_API}/repay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      wallet: params.wallet,
+      market,
+      reserve: params.reserve,
+      amount: String(params.amount),
+    }),
+  });
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(`Kamino repay failed (${r.status}): ${err}`);
+  }
+  const data = await r.json();
+  return data.transaction;
+}
+
+export interface KaminoWithdrawParams {
+  wallet: string;
+  market?: string;
+  reserve: string;
+  amount: number;
+}
+
+export async function kaminoWithdraw(params: KaminoWithdrawParams): Promise<string> {
+  const market = params.market ?? KAMINO_MARKETS.main.address;
+  const r = await fetch(`${KAMINO_API}/withdraw`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      wallet: params.wallet,
+      market,
+      reserve: params.reserve,
+      amount: String(params.amount),
+    }),
+  });
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(`Kamino withdraw failed (${r.status}): ${err}`);
+  }
+  const data = await r.json();
+  return data.transaction;
 }

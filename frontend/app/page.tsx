@@ -27,6 +27,7 @@ import {
 import {
   openCustomLeveragePosition,
   estimateCustomLeverage,
+  closeKaminoPosition,
   type CustomLeverageEstimate,
 } from "@/lib/custom-leverage";
 import {
@@ -327,6 +328,8 @@ function SpotLeveragePanel({
   const [solPrice, setSolPrice] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [obligations, setObligations] = useState<KaminoObligation[]>([]);
+  const [closingIndex, setClosingIndex] = useState<number | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
   const [solBalance, setSolBalance] = useState<number | null>(null);
 
   // Reserve for network fees + rent on new obligation/token accounts.
@@ -532,6 +535,41 @@ function SpotLeveragePanel({
       setBridgeStep("idle");
     }
   }, [selectedToken, evmAddress, connected, publicKey, wallet, bridgeUsdcAmount, leverage, slippage, solPrice, connection]);
+
+  // ─── Close an existing Kamino leverage position ───────────────────────
+  const handleClosePosition = useCallback(async (obs: KaminoObligation, index: number) => {
+    if (!connected || !publicKey || !wallet) {
+      setCloseError("Connect your Solana wallet first.");
+      return;
+    }
+    const borrow = obs.borrows[0];
+    const deposit = obs.deposits[0];
+    if (!deposit) {
+      setCloseError("No collateral found on this obligation.");
+      return;
+    }
+    setClosingIndex(index);
+    setCloseError(null);
+    try {
+      const res = await closeKaminoPosition({
+        walletAddress: publicKey.toBase58(),
+        walletAdapter: wallet.adapter,
+        connection,
+        debtReserve: borrow?.borrowReserve ?? "",
+        collateralReserve: deposit.depositReserve,
+        amountUsdcOwed: borrow ? obs.borrowedValueUsd : 0,
+        amountSolDeposited: Number(deposit.depositedAmount) / 1e9,
+      });
+      setResult(res);
+      if (publicKey) {
+        getUserObligations(publicKey.toBase58()).then(setObligations).catch(() => {});
+      }
+    } catch (e: any) {
+      setCloseError(e?.message ?? String(e));
+    } finally {
+      setClosingIndex(null);
+    }
+  }, [connected, publicKey, wallet, connection]);
 
   // ─── Direct Solana leverage execution (existing flow) ───────────────
   const handleExecute = useCallback(async () => {
@@ -1068,8 +1106,18 @@ function SpotLeveragePanel({
                     >
                       View on Kamino ↗
                     </a>
+                    <button
+                      onClick={() => handleClosePosition(obs, i)}
+                      disabled={closingIndex !== null}
+                      className="w-full text-center text-[11px] font-bold py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-50 transition-colors"
+                    >
+                      {closingIndex === i ? "Closing…" : "Close Position (Repay + Withdraw)"}
+                    </button>
                   </div>
                 ))}
+                {closeError && (
+                  <div className="text-[11px] text-red-400 bg-red-500/10 rounded-lg p-2">{closeError}</div>
+                )}
               </div>
             )}
 
