@@ -2,16 +2,11 @@
 const nextConfig = {
   reactStrictMode: true,
   typescript: {
-    // Skip type checking during build — type issues are from transitive deps we don't control
     ignoreBuildErrors: true,
   },
-  // Next.js 16 no longer supports eslint config in next.config.js
-  // eslint is handled via eslint.config.js or .eslintrc
+  // Next.js 16 uses Turbopack by default — provide empty config to satisfy it
+  turbopack: {},
   webpack: (config, { isServer }) => {
-    // Silence missing optional transitive deps from wallet SDKs.
-    // @coinbase/cdp-sdk optionally imports @x402/* modules that we don't need.
-    // These are pulled in by @wagmi/connectors → @base-org/account → @coinbase/cdp-sdk.
-    // We never use Coinbase Smart Accounts, so these are safe to ignore.
     const falseModules = [
       '@x402/evm',
       '@x402/core/client',
@@ -22,8 +17,6 @@ const nextConfig = {
     for (const mod of falseModules) {
       config.resolve.alias[mod] = false;
     }
-
-    // pino-pretty is an optional peer dep of pino (used by walletconnect)
     config.resolve.alias['pino-pretty'] = false;
 
     if (!isServer) {

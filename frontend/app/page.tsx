@@ -327,6 +327,16 @@ function SpotLeveragePanel({
   const [solPrice, setSolPrice] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [obligations, setObligations] = useState<KaminoObligation[]>([]);
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+
+  // Reserve for network fees + rent on new obligation/token accounts.
+  // "Insufficient funds for fee" happens when collateral eats the whole balance.
+  const SOL_FEE_RESERVE = 0.02;
+
+  // Which collateral source drives the estimate + execution. Explicit and
+  // user-controlled — do NOT infer this from wallet-connection state, that's
+  // what caused the estimate to silently ignore the SOL field (stuck at $50).
+  const [depositMode, setDepositMode] = useState<"sol" | "bridge">("sol");
 
   // ─── Cross-chain bridge state ─────────────────────────────────────
   const [bridgeUsdcAmount, setBridgeUsdcAmount] = useState(50);
@@ -341,6 +351,13 @@ function SpotLeveragePanel({
   const isSolanaConnected = connected && !!publicKey;
   const showBridge = isEvmConnected;
   const isEvmOnly = isEvmConnected && !isSolanaConnected; // still needed for "How it works" text variant
+
+  // Auto-pick a sane default mode when only one path is even possible, but
+  // never override a manual choice once both paths are available.
+  useEffect(() => {
+    if (isEvmOnly) setDepositMode("bridge");
+    else if (isSolanaConnected && !isEvmConnected) setDepositMode("sol");
+  }, [isEvmOnly, isSolanaConnected, isEvmConnected]);
 
   // Fetch SOL price when token selected
   useEffect(() => {
@@ -377,8 +394,27 @@ function SpotLeveragePanel({
     return () => { alive = false; clearInterval(iv); };
   }, [connected, publicKey, result]);
 
-  // Calculate estimate — use bridged USDC for EVM users, SOL collateral for Solana users
-  const effectiveCollateralSol = isEvmConnected && solPrice && bridgeUsdcAmount > 0 && isSolanaConnected
+  // Fetch wallet SOL balance so we can stop the "insufficient funds for fee"
+  // simulation failure before it happens instead of after.
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setSolBalance(null);
+      return;
+    }
+    let alive = true;
+    const fetchBalance = () => {
+      connection.getBalance(publicKey)
+        .then(lamports => { if (alive) setSolBalance(lamports / 1e9); })
+        .catch(() => {});
+    };
+    fetchBalance();
+    const iv = setInterval(fetchBalance, 15000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [connected, publicKey, connection, result]);
+
+  // Calculate estimate — driven by the explicit depositMode toggle, not by
+  // which wallets happen to be connected.
+  const effectiveCollateralSol = depositMode === "bridge" && solPrice && bridgeUsdcAmount > 0
     ? bridgeUsdcAmount / solPrice
     : collateralSol;
   const estimate: CustomLeverageEstimate | null =
@@ -506,6 +542,18 @@ function SpotLeveragePanel({
     }
     if (collateralSol <= 0) {
       setError("Enter a valid SOL collateral amount.");
+      return;
+    }
+    if (solBalance === null) {
+      setError("Still fetching your SOL balance — wait a second and try again.");
+      return;
+    }
+    if (collateralSol > solBalance - SOL_FEE_RESERVE) {
+      setError(
+        `Not enough SOL left for network fees. You have ${solBalance.toFixed(4)} SOL — ` +
+        `deposit at most ${Math.max(0, solBalance - SOL_FEE_RESERVE).toFixed(4)} SOL and keep ` +
+        `~${SOL_FEE_RESERVE} SOL free for tx fees + rent.`
+      );
       return;
     }
 
@@ -649,8 +697,26 @@ function SpotLeveragePanel({
           {/* ── Leverage Form ── */}
           <div className="space-y-4">
 
-            {/* ── Cross-Chain Bridge Banner (EVM-only users) ── */}
-            {showBridge && (
+            {/* ── Deposit Mode Toggle (only matters when both paths are available) ── */}
+            {showBridge && isSolanaConnected && (
+              <div className="flex rounded-lg border border-white/10 overflow-hidden text-xs font-bold">
+                <button
+                  onClick={() => setDepositMode("sol")}
+                  className={`flex-1 py-2 ${depositMode === "sol" ? "bg-purple-500/20 text-purple-300" : "bg-white/[0.02] text-muted"}`}
+                >
+                  Deposit SOL directly
+                </button>
+                <button
+                  onClick={() => setDepositMode("bridge")}
+                  className={`flex-1 py-2 ${depositMode === "bridge" ? "bg-blue-500/20 text-blue-300" : "bg-white/[0.02] text-muted"}`}
+                >
+                  Bridge from Arbitrum
+                </button>
+              </div>
+            )}
+
+            {/* ── Cross-Chain Bridge Banner (EVM-only users, or SOL users who opted in) ── */}
+            {showBridge && (!isSolanaConnected || depositMode === "bridge") && (
               <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <span className="text-lg">🌉</span>
@@ -751,11 +817,22 @@ function SpotLeveragePanel({
             )}
 
             {/* ── SOL Collateral Input (only for Solana-connected users) ── */}
-            {isSolanaConnected && (
+            {isSolanaConnected && (!showBridge || depositMode === "sol") && (
               <div>
-                <label className="text-xs font-bold text-muted uppercase tracking-wider mb-1.5 block">
-                  SOL Collateral
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-muted uppercase tracking-wider block">
+                    SOL Collateral
+                  </label>
+                  {solBalance !== null && (
+                    <button
+                      type="button"
+                      onClick={() => setCollateralSol(Math.max(0, +(solBalance - SOL_FEE_RESERVE).toFixed(4)))}
+                      className="text-[10px] text-purple-400 hover:text-purple-300 font-mono"
+                    >
+                      Balance: {solBalance.toFixed(4)} SOL · Max
+                    </button>
+                  )}
+                </div>
                 <input
                   type="number"
                   value={collateralSol}
@@ -765,6 +842,11 @@ function SpotLeveragePanel({
                   placeholder="0.5"
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-purple-500/50"
                 />
+                {solBalance !== null && collateralSol > solBalance - SOL_FEE_RESERVE && (
+                  <div className="text-[10px] text-yellow-400 mt-1">
+                    ⚠ Leaves less than {SOL_FEE_RESERVE} SOL for fees — deposit will fail.
+                  </div>
+                )}
                 {solPrice && collateralSol > 0 && (
                   <div className="text-[10px] text-muted mt-1">
                     ≈ {fmtUsd(collateralSol * solPrice)}
@@ -873,20 +955,32 @@ function SpotLeveragePanel({
               </div>
             )}
 
-            {/* ── Execute Button (Solana-connected users only) ── */}
-            {isSolanaConnected && (
+            {/* ── Execute Button (Solana-connected users, direct-SOL mode only) ── */}
+            {isSolanaConnected && (!showBridge || depositMode === "sol") && (
               <button
                 onClick={handleExecute}
-                disabled={executing || !connected || collateralSol <= 0}
+                disabled={
+                  executing || !connected || collateralSol <= 0 ||
+                  solBalance === null ||
+                  collateralSol > solBalance - SOL_FEE_RESERVE
+                }
                 className={`w-full py-3 rounded-xl text-sm font-black transition-all ${
                   executing
                     ? "bg-purple-500/30 text-purple-300 cursor-wait"
-                    : connected && collateralSol > 0
+                    : connected && collateralSol > 0 && solBalance !== null && collateralSol <= solBalance - SOL_FEE_RESERVE
                     ? "bg-purple-500/20 text-purple-300 border border-purple-500/40 hover:bg-purple-500/30 hover:border-purple-500/60"
                     : "bg-white/5 text-muted border border-white/5 cursor-not-allowed"
                 }`}
               >
-                {executing ? "Executing…" : connected ? `Open ${leverage}x Long` : "Connect Wallet to Continue"}
+                {executing
+                  ? "Executing…"
+                  : !connected
+                  ? "Connect Wallet to Continue"
+                  : solBalance === null
+                  ? "Loading balance…"
+                  : collateralSol > solBalance - SOL_FEE_RESERVE
+                  ? "Insufficient SOL for fees"
+                  : `Open ${leverage}x Long`}
               </button>
             )}
 
