@@ -439,7 +439,7 @@ export interface KaminoObligation {
   }[];
   borrows: {
     borrowReserve: string;
-    borrowedAmount: string;
+    borrowedAmountSf: string;
     marketValueSf: string;
   }[];
   healthFactor: number;
@@ -462,12 +462,17 @@ export async function getUserObligations(
   const data = await res.json();
   if (!Array.isArray(data)) return [];
 
-  return data.map((o: any) => ({
-    obligationAddress: o.obligationAddress,
-    deposits: (o.state?.deposits ?? []).filter((d: any) => d.depositedAmount !== "0"),
-    borrows: (o.state?.borrows ?? []).filter((b: any) => b.borrowedAmount !== "0"),
-    healthFactor: o.stats?.healthFactor ?? 0,
-    borrowedValueUsd: o.stats?.borrowedValueUsd ?? 0,
-    collateralValueUsd: o.stats?.collateralValueUsd ?? 0,
-  }));
+  return data.map((o: any) => {
+    const stats = o.refreshedStats ?? {};
+    const userTotalBorrow = parseFloat(stats.userTotalBorrow ?? "0");
+    const borrowLiquidationLimit = parseFloat(stats.borrowLiquidationLimit ?? "0");
+    return {
+      obligationAddress: o.obligationAddress,
+      deposits: (o.state?.deposits ?? []).filter((d: any) => d.depositedAmount !== "0"),
+      borrows: (o.state?.borrows ?? []).filter((b: any) => b.borrowedAmountSf !== "0"),
+      healthFactor: userTotalBorrow > 0 ? borrowLiquidationLimit / userTotalBorrow : 999,
+      borrowedValueUsd: userTotalBorrow,
+      collateralValueUsd: parseFloat(stats.userTotalCollateralDeposit ?? "0"),
+    };
+  });
 }
