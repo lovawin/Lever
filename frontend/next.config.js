@@ -8,6 +8,8 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Next.js 16 uses Turbopack by default — provide empty config to satisfy it
+  turbopack: {},
   webpack: (config, { isServer }) => {
     // Silence missing optional transitive deps from wallet SDKs.
     // @coinbase/cdp-sdk optionally imports @x402/* modules that we don't need.

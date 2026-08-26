@@ -37,8 +37,6 @@ import {
   type KaminoObligation,
 } from "@/lib/kamino-borrow";
 import {
-  generateSolanaWallet,
-  getStoredSolanaWallet,
   bridgeEvmToSolana,
   waitForBridgeCompletion,
   sendBridgeTx,
@@ -331,7 +329,6 @@ function SpotLeveragePanel({
   const [obligations, setObligations] = useState<KaminoObligation[]>([]);
 
   // ─── Cross-chain bridge state ─────────────────────────────────────
-  const [autoSolWallet, setAutoSolWallet] = useState<string | null>(null);
   const [bridgeUsdcAmount, setBridgeUsdcAmount] = useState(50);
   const [bridgeStep, setBridgeStep] = useState<
     "idle" | "approving" | "bridging" | "waiting" | "swapping" | "leveraging" | "done"
@@ -339,9 +336,11 @@ function SpotLeveragePanel({
   const [bridgeStatus, setBridgeStatus] = useState<string>("");
   const [bridgeError, setBridgeError] = useState<string | null>(null);
 
-  // Detect: EVM connected, Solana NOT connected = cross-chain user
-  const isEvmOnly = evmConnected && !!evmAddress && !connected;
+  // EVM + Solana both needed for cross-chain bridge flow
+  const isEvmConnected = evmConnected && !!evmAddress;
   const isSolanaConnected = connected && !!publicKey;
+  const showBridge = isEvmConnected;
+  const isEvmOnly = isEvmConnected && !isSolanaConnected; // still needed for "How it works" text variant
 
   // Fetch SOL price when token selected
   useEffect(() => {
@@ -350,15 +349,6 @@ function SpotLeveragePanel({
     getSolPrice().then(p => { if (alive) setSolPrice(p); }).catch(() => {});
     return () => { alive = false; };
   }, [selectedToken]);
-
-  // Auto-generate Solana wallet for EVM-only users
-  useEffect(() => {
-    if (isEvmOnly && !autoSolWallet) {
-      generateSolanaWallet().then(({ publicKey }) => {
-        setAutoSolWallet(publicKey);
-      }).catch(() => {});
-    }
-  }, [isEvmOnly, autoSolWallet]);
 
   // Reset state when token changes
   useEffect(() => {
@@ -388,7 +378,7 @@ function SpotLeveragePanel({
   }, [connected, publicKey, result]);
 
   // Calculate estimate — use bridged USDC for EVM users, SOL collateral for Solana users
-  const effectiveCollateralSol = isEvmOnly && solPrice && bridgeUsdcAmount > 0
+  const effectiveCollateralSol = isEvmConnected && solPrice && bridgeUsdcAmount > 0 && isSolanaConnected
     ? bridgeUsdcAmount / solPrice
     : collateralSol;
   const estimate: CustomLeverageEstimate | null =
@@ -403,8 +393,8 @@ function SpotLeveragePanel({
       setBridgeError("Connect your EVM wallet first (MetaMask/Rainbow).");
       return;
     }
-    if (!autoSolWallet) {
-      setBridgeError("Generating Solana wallet… please wait.");
+    if (!connected || !publicKey || !wallet) {
+      setBridgeError("Connect your Solana wallet (Phantom/Solflare) to receive bridged funds.");
       return;
     }
     if (bridgeUsdcAmount <= 0) {
@@ -419,9 +409,10 @@ function SpotLeveragePanel({
     try {
       // Step 1: Create the bridge order via deBridge API (enableEstimate=false so it doesn't check balance)
       setBridgeStatus("Step 1/4: Creating deBridge order (Arbitrum → Solana)…");
+      const solanaRecipient = publicKey.toBase58();
       const bridgeOrder = await bridgeEvmToSolana({
         evmAddress,
-        solanaRecipient: autoSolWallet,
+        solanaRecipient,
         usdcAmount: bridgeUsdcAmount,
       });
 
@@ -459,41 +450,16 @@ function SpotLeveragePanel({
         },
       });
 
-      // Step 4: Now we have USDC on the auto-generated Solana wallet.
+      // Step 4: Now we have USDC on the user's connected Solana wallet.
       // Convert USDC → SOL via Jupiter, then run the leverage engine.
       setBridgeStep("leveraging");
       setBridgeStatus("Step 4/4: USDC received on Solana! Running leverage engine…");
-
-      // Retrieve the stored keypair for signing Solana transactions
-      const stored = getStoredSolanaWallet();
-      if (!stored) {
-        throw new Error("Solana wallet not found. Refresh and try again.");
-      }
-
-      // The auto-generated wallet doesn't have a wallet adapter interface,
-      // so we create a mock adapter that signs with the stored keypair.
-      // generateSolanaWallet() returns the decrypted keypair from localStorage.
-      const keypairResult = await generateSolanaWallet();
-      const solKeypair = keypairResult.keypair;
-
-      // Create a mock wallet adapter for the auto-generated keypair
-      const mockWalletAdapter = {
-        signTransaction: async (tx: any) => {
-          tx.sign([solKeypair]);
-          return tx;
-        },
-        signAllTransactions: async (txs: any[]) => {
-          for (const tx of txs) tx.sign([solKeypair]);
-          return txs;
-        },
-        publicKey: solKeypair.publicKey,
-      };
 
       // Calculate SOL collateral from bridged USDC
       const currentSolPrice = solPrice ?? (await getSolPrice());
       const collateralSolFromBridge = bridgeUsdcAmount / currentSolPrice;
 
-      // Swap ~$3 of USDC → SOL for gas fees (auto wallet has no SOL)
+      // Swap ~$3 of USDC → SOL for gas fees
       setBridgeStatus("Step 4/4: Swapping USDC → SOL for gas…");
       const gasUsdcRaw = usdcToRaw(3); // $3 USDC for gas
       try {
@@ -503,8 +469,8 @@ function SpotLeveragePanel({
           amount: gasUsdcRaw,
           slippageBps: 300, // 3% slippage for gas swap
         });
-        const gasSwapTx = await getJupiterSwapTx(gasQuote, autoSolWallet, 300);
-        await signAndSendTransaction(gasSwapTx, mockWalletAdapter, connection);
+        const gasSwapTx = await getJupiterSwapTx(gasQuote, solanaRecipient, 300);
+        await signAndSendTransaction(gasSwapTx, wallet.adapter, connection);
       } catch (gasErr: any) {
         // Gas swap might fail if insufficient USDC — continue anyway, maybe wallet has some SOL
         console.warn("Gas swap failed:", gasErr?.message);
@@ -512,8 +478,8 @@ function SpotLeveragePanel({
 
       // Run the borrow leverage engine
       const leverageResult = await openBorrowLeveragePosition({
-        walletAddress: autoSolWallet,
-        walletAdapter: mockWalletAdapter,
+        walletAddress: solanaRecipient,
+        walletAdapter: wallet.adapter,
         connection,
         collateralSol: collateralSolFromBridge,
         leverage,
@@ -529,7 +495,7 @@ function SpotLeveragePanel({
       setBridgeError(e?.message ?? String(e));
       setBridgeStep("idle");
     }
-  }, [selectedToken, evmAddress, autoSolWallet, bridgeUsdcAmount, leverage, slippage, solPrice, connection]);
+  }, [selectedToken, evmAddress, connected, publicKey, wallet, bridgeUsdcAmount, leverage, slippage, solPrice, connection]);
 
   // ─── Direct Solana leverage execution (existing flow) ───────────────
   const handleExecute = useCallback(async () => {
@@ -684,7 +650,7 @@ function SpotLeveragePanel({
           <div className="space-y-4">
 
             {/* ── Cross-Chain Bridge Banner (EVM-only users) ── */}
-            {isEvmOnly && (
+            {showBridge && (
               <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <span className="text-lg">🌉</span>
@@ -696,17 +662,14 @@ function SpotLeveragePanel({
                   </div>
                 </div>
 
-                {/* Auto-generated Solana wallet */}
-                {autoSolWallet ? (
+                {/* Connected Solana wallet */}
+                {connected && publicKey ? (
                   <div className="bg-white/[0.03] rounded-lg p-2.5 space-y-1">
-                    <div className="text-[10px] text-muted uppercase tracking-wider">Auto-Generated Solana Wallet</div>
-                    <div className="font-mono text-[11px] text-white truncate">{autoSolWallet}</div>
-                    <div className="text-[10px] text-muted">
-                      ⚠ This wallet is stored encrypted in your browser. No Phantom/Solflare needed.
-                    </div>
+                    <div className="text-[10px] text-muted uppercase tracking-wider">Solana Wallet (Bridge Destination)</div>
+                    <div className="font-mono text-[11px] text-white truncate">{publicKey.toBase58()}</div>
                   </div>
                 ) : (
-                  <div className="text-xs text-muted">Generating Solana wallet…</div>
+                  <div className="text-xs text-yellow-400">⚠ Connect your Solana wallet (Phantom/Solflare) to receive bridged funds.</div>
                 )}
 
                 {/* USDC amount to bridge */}
@@ -736,7 +699,7 @@ function SpotLeveragePanel({
                   disabled={
                     bridgeStep !== "idle" && bridgeStep !== "done" ||
                     bridgeUsdcAmount <= 0 ||
-                    !autoSolWallet
+                    !connected || !publicKey
                   }
                   className={`w-full py-3 rounded-xl text-sm font-black transition-all ${
                     bridgeStep !== "idle" && bridgeStep !== "done"
@@ -904,9 +867,9 @@ function SpotLeveragePanel({
                 ⚠ Connect a wallet to execute. Use EVM (MetaMask/Rainbow) for cross-chain, or Solana (Phantom) for direct leverage.
               </div>
             )}
-            {evmConnected && !connected && autoSolWallet && (
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-2.5 text-xs text-blue-400">
-                ✅ EVM wallet connected. Solana wallet auto-generated for cross-chain bridging.
+            {evmConnected && !connected && (
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2.5 text-xs text-yellow-400">
+                ⚠ EVM wallet connected. Connect your Solana wallet (Phantom/Solflare) too — bridged funds go to your own wallet.
               </div>
             )}
 
@@ -1021,7 +984,7 @@ function SpotLeveragePanel({
               <div className="text-xs font-bold text-purple-400 mb-1">How Custom Leverage Works</div>
               {isEvmOnly ? (
                 <div className="text-xs text-muted space-y-1">
-                  <div>1. <span className="text-white">Bridge</span> — deBridge sends USDC from Arbitrum to your auto-generated Solana wallet</div>
+                  <div>1. <span className="text-white">Bridge</span> — deBridge sends USDC from Arbitrum to your connected Solana wallet</div>
                   <div>2. <span className="text-white">Swap</span> — Jupiter swaps bridged USDC → SOL (collateral)</div>
                   <div>3. <span className="text-white">Borrow</span> — Kamino borrows USDC against SOL with leverage</div>
                   <div>4. <span className="text-white">Swap</span> — Jupiter swaps borrowed USDC → {selectedToken.symbol}</div>
