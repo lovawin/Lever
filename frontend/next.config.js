@@ -5,11 +5,8 @@ const nextConfig = {
     // Skip type checking during build — type issues are from transitive deps we don't control
     ignoreBuildErrors: true,
   },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  // Next.js 16 uses Turbopack by default — provide empty config to satisfy it
-  turbopack: {},
+  // Next.js 16 no longer supports eslint config in next.config.js
+  // eslint is handled via eslint.config.js or .eslintrc
   webpack: (config, { isServer }) => {
     // Silence missing optional transitive deps from wallet SDKs.
     // @coinbase/cdp-sdk optionally imports @x402/* modules that we don't need.
