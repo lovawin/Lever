@@ -1,6 +1,10 @@
 // GeckoTerminal's public API is free, keyless, and documented at
 // https://apiguide.geckoterminal.com — used here instead of pump.fun's own
 // API since pump.fun doesn't expose a public "top gainers" endpoint.
+//
+// GeckoTerminal tracks pump.fun as two separate dexes: "pump-fun" (tokens
+// still on the bonding curve) and "pumpswap" (tokens that have graduated to
+// a real AMM pool — this is where most volume actually is).
 
 export interface TrendingToken {
   mint: string;
@@ -13,43 +17,44 @@ export interface TrendingToken {
   poolAddress: string;
 }
 
+const PUMP_DEXES = ["pump-fun", "pumpswap"];
+
 /**
- * Trending Solana pools, filtered to ones trading on a pump.fun-family dex
- * (their bonding-curve AMM or the post-graduation PumpSwap pool), sorted by
- * 24h price change descending. Falls back to top-volume pools if nothing
- * pump.fun-flagged shows up in the trending set.
+ * Top pump.fun-family pools on Solana, sorted by 24h price change descending.
  */
 export async function getPumpFunGainers(limit = 10): Promise<TrendingToken[]> {
-  const parse = (pool: any): TrendingToken | null => {
+  // include=base_token pulls the actual token (mint address, symbol, name)
+  // into a separate `included` array — the pool's own `attributes` only
+  // has a combined display name like "FOO / SOL", no mint address at all.
+  function parse(pool: any, included: any[]): TrendingToken | null {
     const attrs = pool?.attributes;
     if (!attrs) return null;
-    const [baseAddr] = (attrs.address ?? "").split("_"); // pool address itself, not the base token
-    const name: string = attrs.name ?? "";
-    const symbol = name.split("/")[0]?.trim() || "???";
+
+    const baseTokenId = pool?.relationships?.base_token?.data?.id;
+    const baseToken = included.find((i) => i.type === "token" && i.id === baseTokenId);
+    const mint: string = baseToken?.attributes?.address ?? "";
+    if (!mint) return null;
+
+    const symbol: string = baseToken?.attributes?.symbol || attrs.name?.split("/")[0]?.trim() || "???";
+    const name: string = baseToken?.attributes?.name || symbol;
+
     return {
-      mint: attrs.base_token_address ?? "",
+      mint,
       symbol,
-      name: name || symbol,
+      name,
       priceUsd: parseFloat(attrs.base_token_price_usd ?? "0") || 0,
       priceChange24h: parseFloat(attrs.price_change_percentage?.h24 ?? "0") || 0,
       volume24h: parseFloat(attrs.volume_usd?.h24 ?? "0") || 0,
-      marketCap: parseFloat(attrs.market_cap_usd ?? attrs.fdv_usd ?? "0") || 0,
-      poolAddress: attrs.address ?? baseAddr ?? "",
+      marketCap: parseFloat(attrs.fdv_usd ?? attrs.market_cap_usd ?? "0") || 0,
+      poolAddress: attrs.address ?? "",
     };
-  };
+  }
 
-  const isPumpDex = (pool: any, included: any[]): boolean => {
-    const dexId = pool?.relationships?.dex?.data?.id;
-    if (!dexId) return false;
-    if (dexId.toLowerCase().includes("pump")) return true;
-    const dexEntry = included.find((i) => i.type === "dex" && i.id === dexId);
-    return (dexEntry?.attributes?.name ?? "").toLowerCase().includes("pump");
-  };
-
-  async function fetchPools(path: string): Promise<TrendingToken[]> {
+  async function fetchDexPools(dex: string): Promise<TrendingToken[]> {
     // Routed through our own /api/trending proxy — calling
     // api.geckoterminal.com directly from the browser hit the same
     // CORS wall we found with Kamino's API earlier.
+    const path = `/networks/solana/dexes/${dex}/pools?include=base_token&sort=h24_volume_usd_desc`;
     const r = await fetch(`/api/trending?path=${encodeURIComponent(path)}`, {
       headers: { Accept: "application/json" },
     });
@@ -58,19 +63,21 @@ export async function getPumpFunGainers(limit = 10): Promise<TrendingToken[]> {
     const pools = data.data ?? [];
     const included = data.included ?? [];
     return pools
-      .filter((p: any) => isPumpDex(p, included))
-      .map(parse)
-      .filter((t: TrendingToken | null): t is TrendingToken => !!t && !!t.mint);
+      .map((p: any) => parse(p, included))
+      .filter((t: TrendingToken | null): t is TrendingToken => !!t);
   }
 
   try {
-    let tokens = await fetchPools("/networks/solana/trending_pools?include=dex");
-    if (tokens.length === 0) {
-      // Trending list didn't surface any pump.fun pools right now — fall
-      // back to top pools by volume, which reliably include them.
-      tokens = await fetchPools("/networks/solana/pools?include=dex&sort=h24_volume_usd_desc");
+    const results = await Promise.allSettled(PUMP_DEXES.map(fetchDexPools));
+    const tokens = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+    // Dedupe by mint (a token could theoretically show up via more than one
+    // pool) keeping the highest-volume entry for each.
+    const byMint = new Map<string, TrendingToken>();
+    for (const t of tokens) {
+      const existing = byMint.get(t.mint);
+      if (!existing || t.volume24h > existing.volume24h) byMint.set(t.mint, t);
     }
-    return tokens
+    return [...byMint.values()]
       .sort((a, b) => b.priceChange24h - a.priceChange24h)
       .slice(0, limit);
   } catch {
