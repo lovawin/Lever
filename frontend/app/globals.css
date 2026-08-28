@@ -12,6 +12,14 @@
 
 html, body { background: var(--bg); color: #E8E9EB; }
 
+/* Mobile browsers (Safari in particular) show a floating toolbar that
+   overlaps the bottom of the viewport when scrolling. Without this,
+   content near the bottom of the page — buttons, position estimates —
+   renders underneath it. */
+body {
+  padding-bottom: max(env(safe-area-inset-bottom), 16px);
+}
+
 /* Flat panel — no blur, no glow. Real trading terminals use plain surfaces
    with a hairline border, not glass/backdrop effects. */
 .glass {

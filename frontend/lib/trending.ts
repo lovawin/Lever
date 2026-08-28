@@ -46,8 +46,13 @@ export async function getPumpFunGainers(limit = 10): Promise<TrendingToken[]> {
     return (dexEntry?.attributes?.name ?? "").toLowerCase().includes("pump");
   };
 
-  async function fetchPools(url: string): Promise<TrendingToken[]> {
-    const r = await fetch(url, { headers: { Accept: "application/json" } });
+  async function fetchPools(path: string): Promise<TrendingToken[]> {
+    // Routed through our own /api/trending proxy — calling
+    // api.geckoterminal.com directly from the browser hit the same
+    // CORS wall we found with Kamino's API earlier.
+    const r = await fetch(`/api/trending?path=${encodeURIComponent(path)}`, {
+      headers: { Accept: "application/json" },
+    });
     if (!r.ok) throw new Error(`GeckoTerminal error ${r.status}`);
     const data = await r.json();
     const pools = data.data ?? [];
@@ -59,15 +64,11 @@ export async function getPumpFunGainers(limit = 10): Promise<TrendingToken[]> {
   }
 
   try {
-    let tokens = await fetchPools(
-      "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?include=dex"
-    );
+    let tokens = await fetchPools("/networks/solana/trending_pools?include=dex");
     if (tokens.length === 0) {
       // Trending list didn't surface any pump.fun pools right now — fall
       // back to top pools by volume, which reliably include them.
-      tokens = await fetchPools(
-        "https://api.geckoterminal.com/api/v2/networks/solana/pools?include=dex&sort=h24_volume_usd_desc"
-      );
+      tokens = await fetchPools("/networks/solana/pools?include=dex&sort=h24_volume_usd_desc");
     }
     return tokens
       .sort((a, b) => b.priceChange24h - a.priceChange24h)
