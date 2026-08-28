@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { Zap, LayoutList, TrendingUp, ArrowLeftRight } from "lucide-react";
 import WalletBar from "@/components/WalletBar";
 import TradePanel from "@/components/TradePanel";
 
@@ -10,6 +11,8 @@ import OrderBook from "@/components/OrderBook";
 import PriceChart from "@/components/PriceChart";
 import FundingRate from "@/components/FundingRate";
 import PositionsPanel from "@/components/PositionsPanel";
+import KaminoPositionsPanel from "@/components/KaminoPositionsPanel";
+import PumpGainers from "@/components/PumpGainers";
 import { getAllMids } from "@/lib/hyperliquid";
 import {
   searchTokens,
@@ -47,7 +50,7 @@ import {
 import { useAccount as useWagmiAccount, useWriteContract, usePublicClient } from "wagmi";
 
 export default function Page() {
-  const [tab, setTab] = useState<"perps" | "leverage" | "flash">("perps");
+  const [tab, setTab] = useState<"perps" | "leverage" | "positions" | "flash">("perps");
   const [selectedCoin, setSelectedCoin] = useState("PURR");
   const [mids, setMids] = useState<Record<string, string>>({});
 
@@ -114,33 +117,35 @@ export default function Page() {
 
       {/* Tab Bar */}
       <div className="mx-auto max-w-[1100px] w-full px-4 pt-4">
-        <div className="flex gap-1 p-1 bg-white/[0.03] rounded-xl border border-white/[0.06]">
+        <div className="flex gap-1 p-1 bg-panel rounded-lg border border-border">
           <button
             onClick={() => setTab("perps")}
-            className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 ${
-              tab === "perps"
-                ? "bg-bull/15 text-bull border border-bull/30"
-                : "text-muted hover:text-white hover:bg-white/5 border border-transparent"
+            className={`flex-1 py-2.5 rounded text-sm font-medium transition-colors ${
+              tab === "perps" ? "bg-accent text-white" : "text-muted hover:text-text"
             }`}
           >
             Perps
           </button>
           <button
             onClick={() => setTab("leverage")}
-            className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 ${
-              tab === "leverage"
-                ? "bg-accent/15 text-accent border border-accent/30"
-                : "text-muted hover:text-white hover:bg-white/5 border border-transparent"
+            className={`flex-1 py-2.5 rounded text-sm font-medium transition-colors ${
+              tab === "leverage" ? "bg-accent text-white" : "text-muted hover:text-text"
             }`}
           >
             Spot Leverage
           </button>
           <button
+            onClick={() => setTab("positions")}
+            className={`flex-1 py-2.5 rounded text-sm font-medium transition-colors ${
+              tab === "positions" ? "bg-accent text-white" : "text-muted hover:text-text"
+            }`}
+          >
+            Positions
+          </button>
+          <button
             onClick={() => setTab("flash")}
-            className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 ${
-              tab === "flash"
-                ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
-                : "text-muted hover:text-white hover:bg-white/5 border border-transparent"
+            className={`flex-1 py-2.5 rounded text-sm font-medium transition-colors ${
+              tab === "flash" ? "bg-accent text-white" : "text-muted hover:text-text"
             }`}
           >
             Flash Loans
@@ -183,7 +188,10 @@ export default function Page() {
             </div>
           </div>
         ) : tab === "leverage" ? (
-          <div className="mx-auto max-w-[680px]">
+          <div className="mx-auto max-w-[680px] space-y-4">
+            <ErrorBoundary name="PumpGainers">
+              <PumpGainers onSelect={(t) => { setSelectedToken(t); setSolQuery(t.symbol); }} />
+            </ErrorBoundary>
             <div className="glass rounded-2xl p-5">
               <SpotLeveragePanel
                 query={solQuery}
@@ -195,11 +203,20 @@ export default function Page() {
               />
             </div>
           </div>
+        ) : tab === "positions" ? (
+          <div className="mx-auto max-w-[680px] space-y-4">
+            <ErrorBoundary name="KaminoPositions">
+              <KaminoPositionsPanel />
+            </ErrorBoundary>
+            <ErrorBoundary name="Positions">
+              <PositionsPanel />
+            </ErrorBoundary>
+          </div>
         ) : (
           <div className="mx-auto max-w-[680px]">
             <div className="glass rounded-2xl p-5">
               <div className="text-center py-16">
-                <div className="text-5xl mb-4"></div>
+                <Zap size={40} className="mx-auto mb-4 text-muted" strokeWidth={1.5} />
                 <h2 className="text-xl font-black mb-2">Flash Loans</h2>
                 <p className="text-sm text-muted max-w-sm mx-auto">
                   Atomic flash loan strategies on Arbitrum — arbitrage, self-liquidation, and leverage loops. Powered by Aave v3.
@@ -746,7 +763,7 @@ function SpotLeveragePanel({
                 </button>
                 <button
                   onClick={() => setDepositMode("bridge")}
-                  className={`flex-1 py-2 ${depositMode === "bridge" ? "bg-blue-500/20 text-blue-300" : "bg-white/[0.02] text-muted"}`}
+                  className={`flex-1 py-2 ${depositMode === "bridge" ? "bg-accent/20 text-blue-300" : "bg-white/[0.02] text-muted"}`}
                 >
                   Bridge from Arbitrum
                 </button>
@@ -755,11 +772,11 @@ function SpotLeveragePanel({
 
             {/* ── Cross-Chain Bridge Banner (EVM-only users, or SOL users who opted in) ── */}
             {showBridge && (!isSolanaConnected || depositMode === "bridge") && (
-              <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 space-y-3">
+              <div className="bg-accent/10 border border-accent/30 rounded-xl p-4 space-y-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg"></span>
+                  <ArrowLeftRight size={18} className="text-accent shrink-0" strokeWidth={1.5} />
                   <div>
-                    <div className="text-sm font-bold text-blue-400">Cross-Chain Bridge</div>
+                    <div className="text-sm font-bold text-accent">Cross-Chain Bridge</div>
                     <div className="text-[11px] text-muted">
                       You need SOL on Solana for leverage. Bridge USDC from Arbitrum → Solana.
                     </div>
@@ -788,7 +805,7 @@ function SpotLeveragePanel({
                     step={1}
                     min={1}
                     placeholder="50"
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-blue-500/50"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-accent/50"
                   />
                   {solPrice && bridgeUsdcAmount > 0 && (
                     <div className="text-[10px] text-muted mt-1">
@@ -1061,7 +1078,7 @@ function SpotLeveragePanel({
                         href={`https://solscan.io/tx/${sig}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block text-[10px] font-mono text-blue-400 hover:text-blue-300 truncate"
+                        className="block text-[10px] font-mono text-accent hover:text-blue-300 truncate"
                       >
                         {sig}
                       </a>
@@ -1112,7 +1129,7 @@ function SpotLeveragePanel({
                       href={`https://kamino.com/borrow/obligation/${obs.obligationAddress}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="block text-center text-[10px] text-blue-400 hover:text-blue-300 pt-1"
+                      className="block text-center text-[10px] text-accent hover:text-blue-300 pt-1"
                     >
                       View on Kamino ↗
                     </a>
@@ -1206,7 +1223,7 @@ function BridgeProgressStep({
   return (
     <div
       className={`flex items-center gap-2 text-xs ${
-        isDone ? "text-green-400" : isInProgress ? "text-blue-400" : "text-muted/50"
+        isDone ? "text-green-400" : isInProgress ? "text-accent" : "text-muted/50"
       }`}
     >
       <div
@@ -1214,7 +1231,7 @@ function BridgeProgressStep({
           isDone
             ? "bg-green-500/20"
             : isInProgress
-            ? "bg-blue-500/20 animate-pulse"
+            ? "bg-accent/20 animate-pulse"
             : "bg-white/5"
         }`}
       >

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Wallet, Lock, ArrowRightLeft, CheckCircle2, Check } from "lucide-react";
 
 // ─── Section Nav ──────────────────────────────────────────────────────────
 
@@ -75,12 +76,12 @@ export default function DocsPage() {
             <p className="text-white/70 leading-relaxed mb-4">
               Lever is the first platform that lets you go <strong className="text-white">long or short on fresh memecoins</strong> with real leverage — not just spot swaps, not just perps on BTC/ETH. We combine on-chain vaults, Hyperliquid perps, and Solana spot leverage into one seamless trading experience.
             </p>
-            <div className="bg-gradient-to-r from-bull/5 to-purple-500/5 border border-bull/20 rounded-xl p-5">
-              <p className="text-sm font-bold text-bull mb-2">🚀 The Problem</p>
+            <div className="bg-gradient-to-r from-bull/5 to-accent/5 border border-bull/20 rounded-xl p-5">
+              <p className="text-sm font-bold text-bull mb-2">The Problem</p>
               <p className="text-sm text-white/70">
                 Every day, hundreds of new memecoins launch on Solana. Traders want leverage on these tokens — but existing platforms only offer 1x spot swaps or perps on major coins. There&apos;s nowhere to get 5x, 10x, or 50x leverage on $PEPE, $WIF, $BONK, or the next viral coin.
               </p>
-              <p className="text-sm font-bold text-purple-400 mt-3 mb-2">💡 The Solution</p>
+              <p className="text-sm font-bold text-accent mt-3 mb-2">The Solution</p>
               <p className="text-sm text-white/70">
                 Lever gives you two ways to trade memecoins with leverage: <strong className="text-white">HL Perps</strong> for established coins and <strong className="text-white">Spot Leverage</strong> via Kamino/Jupiter for fresh Solana tokens. Flash Loans are <span className="text-yellow-400">coming soon</span>.
               </p>
@@ -92,12 +93,12 @@ export default function DocsPage() {
             <h2 className="text-2xl font-black mb-4">Why Lever?</h2>
             <div className="grid gap-3">
               {[
-                { emoji: "⚡", title: "Fresh Memecoin Leverage", desc: "Trade the newest Solana tokens with up to 100x leverage via Lavarage, Kamino, and Jupiter. No waiting for perps to list." },
-                { emoji: "🔒", title: "Non-Custodial Vault", desc: "Your USDC sits in the LeverVault smart contract. You can ALWAYS withdraw — even when paused. Emergency withdraw, withdrawAll, and withdraw have no operator gate. The contract literally cannot refuse your withdrawal." },
-                { emoji: "💸", title: "Free Withdrawals", desc: "Deposits and withdrawals are always free. We only charge on trades — open, close, and profit fees. No hidden spread." },
-                { emoji: "🎯", title: "3-Point Fee System", desc: "Open fee + close fee + profit fee (winning trades only). Losing trades only pay open+close. Diamond NFT holders pay zero." },
-                { emoji: "🛡️", title: "Battle-Tested Contracts", desc: "LeverVault is deployed on Arbitrum with reentrancy guards, two-step ownership, emergency withdrawals, and full test coverage. FlashLoanReceiver coming soon." },
-                { emoji: "🌊", title: "Flash Loans — Coming Soon", desc: "Atomic arbitrage, self-liquidation, and leverage loops via Aave v3 flash loans on Arbitrum. Currently in development." },
+                { emoji: "", title: "Fresh Memecoin Leverage", desc: "Trade the newest Solana tokens with up to 100x leverage via Lavarage, Kamino, and Jupiter. No waiting for perps to list." },
+                { emoji: "", title: "Non-Custodial Vault", desc: "Your USDC sits in the LeverVault smart contract. You can ALWAYS withdraw — even when paused. Emergency withdraw, withdrawAll, and withdraw have no operator gate. The contract literally cannot refuse your withdrawal." },
+                { emoji: "", title: "Free Withdrawals", desc: "Deposits and withdrawals are always free. We only charge on trades — open, close, and profit fees. No hidden spread." },
+                { emoji: "", title: "3-Point Fee System", desc: "Open fee + close fee + profit fee (winning trades only). Losing trades only pay open+close. Diamond NFT holders pay zero." },
+                { emoji: "", title: "Battle-Tested Contracts", desc: "LeverVault is deployed on Arbitrum with reentrancy guards, two-step ownership, emergency withdrawals, and full test coverage. FlashLoanReceiver coming soon." },
+                { emoji: "", title: "Flash Loans — Coming Soon", desc: "Atomic arbitrage, self-liquidation, and leverage loops via Aave v3 flash loans on Arbitrum. Currently in development." },
               ].map((item) => (
                 <div key={item.title} className="flex gap-4 p-4 bg-white/[0.02] border border-white/[0.06] rounded-xl">
                   <span className="text-2xl">{item.emoji}</span>
@@ -124,32 +125,32 @@ export default function DocsPage() {
             <div className="grid gap-3 mb-6">
               {[
                 {
-                  icon: "🔐",
+                  icon: "",
                   title: "You withdraw anytime — no one can stop you",
                   desc: "withdraw(), withdrawAll(), and emergencyWithdraw() have no operator check. No approval needed. No cooldown. No gatekeeper. Your USDC, your call. The contract LITERALLY cannot refuse.",
                 },
                 {
-                  icon: "🚨",
+                  icon: "",
                   title: "Emergency withdraw works even when paused",
                   desc: "If the owner pauses the contract (blocks new deposits and position opens), you can STILL pull all your USDC out via emergencyWithdraw(). Pause stops new risk, not your exit.",
                 },
                 {
-                  icon: "✋",
+                  icon: "",
                   title: "Operators can't touch your balance",
                   desc: "Operators (Lever backend) can only deduct from your balance during openPosition() — and only the exact margin + fee amount. They can't arbitrarily drain you. Every deduction is on-chain and verifiable.",
                 },
                 {
-                  icon: "📊",
+                  icon: "",
                   title: "On-chain solvency verification",
                   desc: "Anyone can call isSolvent() or getSolvencyInfo() to verify that vault USDC balance ≥ total deposits. If the math doesn't add up, it's visible immediately.",
                 },
                 {
-                  icon: "🚫",
+                  icon: "",
                   title: "Owner can't rug — rescueTokens blocks USDC",
                   desc: "The rescueTokens() function explicitly CANNOT withdraw USDC. It's only for recovering wrong tokens sent by accident. USDC only leaves via user withdrawals or fee transfers to the treasury.",
                 },
                 {
-                  icon: "🔒",
+                  icon: "",
                   title: "All fees are capped on-chain",
                   desc: "Open/close fees are capped at 10% (1000 bps) max. Profit fees capped at 20% (2000 bps). The owner cannot set fees higher than these hard caps — it's enforced by the contract.",
                 },
@@ -166,28 +167,28 @@ export default function DocsPage() {
 
             {/* Visual flow */}
             <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 mb-6">
-              <p className="text-sm font-bold text-white mb-3">📦 Where your USDC actually lives</p>
+              <p className="text-sm font-bold text-white mb-3">Where your USDC actually lives</p>
               <div className="space-y-3 text-sm font-mono">
                 <div className="flex items-center gap-3 p-3 bg-white/[0.03] rounded-lg">
-                  <span className="text-lg">👤</span>
+                  <Wallet size={18} className="text-muted shrink-0" strokeWidth={1.5} />
                   <div className="flex-1">
                     <span className="text-white font-bold">Your Wallet</span>
                     <span className="text-white/30 ml-2">→ USDC here, you control it</span>
                   </div>
-                  <span className="text-bull">✅ Self-custody</span>
+                  <span className="text-bull">Self-custody</span>
                 </div>
                 <div className="flex justify-center text-white/20">↓ deposit()</div>
                 <div className="flex items-center gap-3 p-3 bg-bull/5 border border-bull/20 rounded-lg">
-                  <span className="text-lg">🏦</span>
+                  <Lock size={18} className="text-bull shrink-0" strokeWidth={1.5} />
                   <div className="flex-1">
                     <span className="text-white font-bold">LeverVault Contract</span>
                     <span className="text-white/30 ml-2">→ USDC locked on Arbitrum</span>
                   </div>
-                  <span className="text-bull">✅ You can always withdraw</span>
+                  <span className="text-bull">You can always withdraw</span>
                 </div>
                 <div className="flex justify-center text-white/20">↓ openPosition()</div>
                 <div className="flex items-center gap-3 p-3 bg-white/[0.03] rounded-lg">
-                  <span className="text-lg">📈</span>
+                  <ArrowRightLeft size={18} className="text-muted shrink-0" strokeWidth={1.5} />
                   <div className="flex-1">
                     <span className="text-white font-bold">HL Master Account</span>
                     <span className="text-white/30 ml-2">→ Margin sent to Hyperliquid</span>
@@ -196,29 +197,29 @@ export default function DocsPage() {
                 </div>
                 <div className="flex justify-center text-white/20">↓ closePosition()</div>
                 <div className="flex items-center gap-3 p-3 bg-bull/5 border border-bull/20 rounded-lg">
-                  <span className="text-lg">💰</span>
+                  <CheckCircle2 size={18} className="text-bull shrink-0" strokeWidth={1.5} />
                   <div className="flex-1">
                     <span className="text-white font-bold">Back to LeverVault</span>
                     <span className="text-white/30 ml-2">→ Margin + profit returned to your balance</span>
                   </div>
-                  <span className="text-bull">✅ You withdraw anytime</span>
+                  <span className="text-bull">You withdraw anytime</span>
                 </div>
               </div>
             </div>
 
             {/* Not your keys warning */}
             <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 mb-6">
-              <p className="text-sm font-bold text-white mb-3">⚠️ Honest disclosure: It's a smart contract, not your wallet</p>
+              <p className="text-sm font-bold text-white mb-3"> Honest disclosure: It's a smart contract, not your wallet</p>
               <p className="text-sm text-white/60 leading-relaxed mb-3">
                 "Self-custodial" means the <strong className="text-white">contract code</strong> guarantees your withdrawal rights — not that USDC sits in your personal wallet during a trade. Here's the nuance:
               </p>
               <div className="space-y-2 text-sm">
                 <div className="flex gap-2">
-                  <span className="text-bull">✓</span>
+                  <Check size={16} className="text-bull shrink-0 mt-0.5" strokeWidth={2} />
                   <span className="text-white/70"><strong className="text-white">Deposited USDC:</strong> sits in LeverVault on Arbitrum. You can withdraw it anytime via the contract — no approval, no delay, no minimums beyond $0.01.</span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-bull">✓</span>
+                  <Check size={16} className="text-bull shrink-0 mt-0.5" strokeWidth={2} />
                   <span className="text-white/70"><strong className="text-white">Open position margin:</strong> sent to the HL master account on Hyperliquid. When the position closes, margin + profit (minus fees) returns to your LeverVault balance.</span>
                 </div>
                 <div className="flex gap-2">
@@ -226,7 +227,7 @@ export default function DocsPage() {
                   <span className="text-white/70"><strong className="text-white">During an open trade:</strong> your margin is on Hyperliquid, not in the vault. You can't withdraw mid-trade (that would be pulling margin from an active position). Close the position first, then withdraw.</span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-bull">✓</span>
+                  <Check size={16} className="text-bull shrink-0 mt-0.5" strokeWidth={2} />
                   <span className="text-white/70"><strong className="text-white">Smart contract risk:</strong> Like all DeFi, there's smart contract risk. The contract has reentrancy guards, fee caps, and 74 tests — but bugs are always possible. Only deposit what you can afford to lose.</span>
                 </div>
               </div>
@@ -234,7 +235,7 @@ export default function DocsPage() {
 
             {/* Quick comparison */}
             <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5">
-              <p className="text-sm font-bold text-white mb-3">🏦 CEX vs Lever Vault</p>
+              <p className="text-sm font-bold text-white mb-3">CEX vs Lever Vault</p>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
@@ -247,7 +248,7 @@ export default function DocsPage() {
                   <tbody className="text-white/70">
                     <tr className="border-b border-white/5">
                       <td className="py-2 px-2">Can you withdraw anytime?</td>
-                      <td className="py-2 px-2 text-center text-bull font-bold">✅ Always</td>
+                      <td className="py-2 px-2 text-center text-bull font-bold">Always</td>
                       <td className="py-2 px-2 text-center text-white/30">Sometimes paused</td>
                     </tr>
                     <tr className="border-b border-white/5">
@@ -257,8 +258,8 @@ export default function DocsPage() {
                     </tr>
                     <tr className="border-b border-white/5">
                       <td className="py-2 px-2">Works when paused?</td>
-                      <td className="py-2 px-2 text-center text-bull font-bold">✅ withdrawals work</td>
-                      <td className="py-2 px-2 text-center text-white/30">❌ everything frozen</td>
+                      <td className="py-2 px-2 text-center text-bull font-bold">withdrawals work</td>
+                      <td className="py-2 px-2 text-center text-white/30">everything frozen</td>
                     </tr>
                     <tr className="border-b border-white/5">
                       <td className="py-2 px-2">Withdrawal fees?</td>
@@ -267,8 +268,8 @@ export default function DocsPage() {
                     </tr>
                     <tr className="border-b border-white/5">
                       <td className="py-2 px-2">Verifiable on-chain?</td>
-                      <td className="py-2 px-2 text-center text-bull font-bold">✅</td>
-                      <td className="py-2 px-2 text-center text-white/30">❌</td>
+                      <td className="py-2 px-2 text-center text-bull font-bold"></td>
+                      <td className="py-2 px-2 text-center text-white/30"></td>
                     </tr>
                     <tr>
                       <td className="py-2 px-2">Can owner steal USDC?</td>
@@ -285,7 +286,7 @@ export default function DocsPage() {
           <section id="how-it-works" className="scroll-mt-24">
             <h2 className="text-2xl font-black mb-4">How It Works</h2>
 
-            <h3 className="text-lg font-bold mb-2 text-bull">⚡ HL Perps Mode</h3>
+            <h3 className="text-lg font-bold mb-2 text-bull">HL Perps Mode</h3>
             <p className="text-sm text-white/60 mb-3">
               Trade Hyperliquid perpetuals through Lever. Your margin sits in the LeverVault on Arbitrum, and our operator opens/closes positions on Hyperliquid on your behalf.
             </p>
@@ -300,15 +301,15 @@ export default function DocsPage() {
               </div>
             </div>
 
-            <h3 className="text-lg font-bold mb-2 text-purple-400">🌀 Spot Leverage Mode</h3>
+            <h3 className="text-lg font-bold mb-2 text-accent">Spot Leverage Mode</h3>
             <p className="text-sm text-white/60 mb-3">
               Get leverage on fresh Solana tokens that don&apos;t have perps yet — including pump.fun launches. No external API key needed.
             </p>
             <div className="space-y-2 mb-6">
               {[
                 { tier: "Step 1", label: "Kamino Setup", desc: "Create obligation account with SOL as collateral.", color: "text-bull" },
-                { tier: "Step 2", label: "Kamino Borrow", desc: "Borrow USDC against your SOL collateral at your chosen leverage (2x–10x).", color: "text-blue-400" },
-                { tier: "Step 3", label: "Jupiter Swap", desc: "Swap borrowed USDC → your target memecoin. Works on ANY Solana token including pump.fun.", color: "text-purple-400" },
+                { tier: "Step 2", label: "Kamino Borrow", desc: "Borrow USDC against your SOL collateral at your chosen leverage (2x–10x).", color: "text-accent" },
+                { tier: "Step 3", label: "Jupiter Swap", desc: "Swap borrowed USDC → your target memecoin. Works on ANY Solana token including pump.fun.", color: "text-accent" },
               ].map((t) => (
                 <div key={t.tier} className="flex items-center gap-3 p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl">
                   <span className={`text-xs font-bold ${t.color}`}>{t.tier}</span>
@@ -317,15 +318,15 @@ export default function DocsPage() {
                 </div>
               ))}
             </div>
-            <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-4 mb-6">
-              <p className="text-sm font-bold text-purple-400 mb-1">🔄 How Custom Leverage Works</p>
+            <div className="bg-accent/5 border border-accent/20 rounded-xl p-4 mb-6">
+              <p className="text-sm font-bold text-accent mb-1">How Custom Leverage Works</p>
               <p className="text-xs text-white/50">
                 No Lavarage API key required. We built our own leverage engine using Kamino lending markets + Jupiter swaps. Deposit SOL, borrow USDC, swap to any memecoin. True leverage on pump.fun tokens, Jupiter launches, and any SPL token.
               </p>
             </div>
 
-            <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-4 mb-6">
-              <p className="text-sm font-bold text-blue-400 mb-2">🌉 Cross-Chain Bridge for EVM Users</p>
+            <div className="bg-accent/5 border border-accent/20 rounded-xl p-4 mb-6">
+              <p className="text-sm font-bold text-accent mb-2">Cross-Chain Bridge for EVM Users</p>
               <p className="text-xs text-white/50 mb-3">
                 Don&apos;t have a Solana wallet? No problem. If you have MetaMask, Rainbow, or any EVM wallet with USDC on Arbitrum, you can still use Spot Leverage.
               </p>
@@ -340,7 +341,7 @@ export default function DocsPage() {
               </p>
             </div>
 
-            <h3 className="text-lg font-bold mb-2 text-yellow-400">⚡ Flash Loans — Coming Soon</h3>
+            <h3 className="text-lg font-bold mb-2 text-yellow-400">Flash Loans — Coming Soon</h3>
             <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4 font-mono text-xs text-white/60">
               <div className="text-yellow-400 font-bold mb-2 text-sm font-sans">Flash Loan Mode</div>
               <div className="space-y-1">
@@ -391,7 +392,7 @@ export default function DocsPage() {
 
             {/* Fee example */}
             <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5">
-              <p className="text-sm font-bold text-white mb-3">📊 Example: $1,000 trade with 10x leverage ($10,000 notional) — Iron Tier</p>
+              <p className="text-sm font-bold text-white mb-3">Example: $1,000 trade with 10x leverage ($10,000 notional) — Iron Tier</p>
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex justify-between">
                   <span className="text-white/50">Notional (margin × leverage)</span>
@@ -428,8 +429,8 @@ export default function DocsPage() {
             </div>
 
             {/* Diamond savings */}
-            <div className="mt-4 bg-gradient-to-r from-cyan-500/5 to-purple-500/5 border border-cyan-500/20 rounded-xl p-4">
-              <p className="text-sm font-bold text-cyan-400 mb-1">💎 Diamond Tier = Zero Fees</p>
+            <div className="mt-4 bg-gradient-to-r from-cyan-500/5 to-accent/5 border border-cyan-500/20 rounded-xl p-4">
+              <p className="text-sm font-bold text-cyan-400 mb-1">Diamond Tier = Zero Fees</p>
               <p className="text-xs text-white/50">
                 Diamond NFT holders pay 0% open, 0% close, and 0% profit fee. Plus 25% funding rebates and 25% revenue share from the platform. It&apos;s like owning a piece of the house.
               </p>
@@ -441,13 +442,13 @@ export default function DocsPage() {
             <h2 className="text-2xl font-black mb-4">Security</h2>
             <div className="grid gap-3 mb-6">
               {[
-                { icon: "🔒", title: "Non-Custodial", desc: "LeverVault holds your USDC on Arbitrum. You can withdraw anytime — even if the protocol is paused. Emergency withdraw is always available." },
-                { icon: "🛡️", title: "ReentrancyGuard", desc: "LeverVault uses reentrancy guards on all external-facing functions. No re-entrancy attacks." },
-                { icon: "⏸️", title: "Pausable", desc: "Owner can pause all operations in an emergency. Emergency withdrawals work even when paused." },
-                { icon: "🚨", title: "Emergency Withdraw", desc: "Pull ALL tokens out instantly — USDC, ETH, any ERC20. Your escape hatch that never goes away." },
-                { icon: "🔑", title: "Two-Step Ownership", desc: "Ownership transfers require the new owner to accept. No accidentally sending control to the wrong address." },
-                { icon: "📝", title: "50 Tests Passing", desc: "LeverVault: 50 tests. Full coverage on deposits, withdrawals, positions, fees, emergency actions, and access control." },
-                { icon: "🔍", title: "Verified Contracts", desc: "All contracts deployed on Arbitrum One. Source code verifiable on Arbiscan." },
+                { icon: "", title: "Non-Custodial", desc: "LeverVault holds your USDC on Arbitrum. You can withdraw anytime — even if the protocol is paused. Emergency withdraw is always available." },
+                { icon: "", title: "ReentrancyGuard", desc: "LeverVault uses reentrancy guards on all external-facing functions. No re-entrancy attacks." },
+                { icon: "⏸", title: "Pausable", desc: "Owner can pause all operations in an emergency. Emergency withdrawals work even when paused." },
+                { icon: "", title: "Emergency Withdraw", desc: "Pull ALL tokens out instantly — USDC, ETH, any ERC20. Your escape hatch that never goes away." },
+                { icon: "", title: "Two-Step Ownership", desc: "Ownership transfers require the new owner to accept. No accidentally sending control to the wrong address." },
+                { icon: "", title: "50 Tests Passing", desc: "LeverVault: 50 tests. Full coverage on deposits, withdrawals, positions, fees, emergency actions, and access control." },
+                { icon: "", title: "Verified Contracts", desc: "All contracts deployed on Arbitrum One. Source code verifiable on Arbiscan." },
               ].map((item) => (
                 <div key={item.title} className="flex gap-3 p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl">
                   <span className="text-lg">{item.icon}</span>
@@ -581,45 +582,45 @@ export default function DocsPage() {
                 <tbody className="text-white/70">
                   <tr className="border-b border-white/5">
                     <td className="py-2 px-2">Fresh memecoin leverage</td>
-                    <td className="py-2 px-2 text-center text-bull font-bold">✅</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
+                    <td className="py-2 px-2 text-center text-bull font-bold"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
                     <td className="py-2 px-2 text-center text-white/30">1x only</td>
                   </tr>
                   <tr className="border-b border-white/5">
                     <td className="py-2 px-2">Non-custodial vault</td>
-                    <td className="py-2 px-2 text-center text-bull font-bold">✅</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
+                    <td className="py-2 px-2 text-center text-bull font-bold"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
                   </tr>
                   <tr className="border-b border-white/5">
                     <td className="py-2 px-2">Free withdrawals</td>
-                    <td className="py-2 px-2 text-center text-bull font-bold">✅</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">✅</td>
+                    <td className="py-2 px-2 text-center text-bull font-bold"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
                   </tr>
                   <tr className="border-b border-white/5">
                     <td className="py-2 px-2">Flash loan arbitrage</td>
                     <td className="py-2 px-2 text-center text-yellow-400">Coming Soon</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
                   </tr>
                   <tr className="border-b border-white/5">
                     <td className="py-2 px-2">Emergency withdraw</td>
-                    <td className="py-2 px-2 text-center text-bull font-bold">✅</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
+                    <td className="py-2 px-2 text-center text-bull font-bold"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
                   </tr>
                   <tr className="border-b border-white/5">
                     <td className="py-2 px-2">NFT fee discounts</td>
-                    <td className="py-2 px-2 text-center text-bull font-bold">✅</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
-                    <td className="py-2 px-2 text-center text-white/30">❌</td>
+                    <td className="py-2 px-2 text-center text-bull font-bold"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
+                    <td className="py-2 px-2 text-center text-white/30"></td>
                   </tr>
                   <tr className="border-b border-white/5">
                     <td className="py-2 px-2">Multi-chain</td>
@@ -633,7 +634,7 @@ export default function DocsPage() {
             </div>
 
             <div className="bg-bull/5 border border-bull/20 rounded-xl p-4">
-              <p className="text-sm font-bold text-bull mb-1">🔥 The Key Difference</p>
+              <p className="text-sm font-bold text-bull mb-1">The Key Difference</p>
               <p className="text-xs text-white/60">
                 No other platform lets you leverage <em>fresh</em> memecoins. Perps on dYdX and GMX only cover BTC, ETH, and major coins. Jupiter gives you spot swaps at 1x. Lever gives you 5x–100x on the tokens that just launched — the ones with the most volatility and opportunity.
               </p>
@@ -676,10 +677,10 @@ export default function DocsPage() {
             <h2 className="text-2xl font-black mb-4">Risks</h2>
             <div className="space-y-3">
               {[
-                { icon: "📉", title: "Liquidation Risk", desc: "Leveraged positions can be liquidated if price moves against you. Use stop-losses and manage position size carefully." },
-                { icon: "💸", title: "Fee Impact", desc: "At 4.5% open + 4.5% close (Iron tier), you need the price to move >9% in your favor just to break even on a 1x trade. Higher leverage means smaller break-even moves." },
-                { icon: "🔀", title: "Smart Contract Risk", desc: "While audited and tested, smart contracts carry inherent risk. Only deposit what you can afford to lose. Emergency withdraw is your safety net." },
-                { icon: "⛓️", title: "Cross-Chain Risk", desc: "HL perps run on Hyperliquid, spot leverage on Solana. Each chain has its own risks including downtime and congestion." },
+                { icon: "", title: "Liquidation Risk", desc: "Leveraged positions can be liquidated if price moves against you. Use stop-losses and manage position size carefully." },
+                { icon: "", title: "Fee Impact", desc: "At 4.5% open + 4.5% close (Iron tier), you need the price to move >9% in your favor just to break even on a 1x trade. Higher leverage means smaller break-even moves." },
+                { icon: "", title: "Smart Contract Risk", desc: "While audited and tested, smart contracts carry inherent risk. Only deposit what you can afford to lose. Emergency withdraw is your safety net." },
+                { icon: "", title: "Cross-Chain Risk", desc: "HL perps run on Hyperliquid, spot leverage on Solana. Each chain has its own risks including downtime and congestion." },
               ].map((r) => (
                 <div key={r.title} className="flex gap-3 p-3 bg-white/[0.02] border border-bear/10 rounded-xl">
                   <span className="text-lg">{r.icon}</span>

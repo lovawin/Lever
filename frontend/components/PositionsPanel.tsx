@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
+import { Wallet } from "lucide-react";
 import {
   getClearinghouseState,
   getUserFills,
@@ -74,7 +75,7 @@ export default function PositionsPanel() {
   if (!isConnected) {
     return (
       <div className="glass rounded-2xl p-8 flex flex-col items-center justify-center text-center min-h-[300px]">
-        <div className="text-5xl mb-4"></div>
+        <Wallet size={40} className="mx-auto mb-4 text-muted" strokeWidth={1.5} />
         <h3 className="text-lg font-bold mb-2">Connect Your Wallet</h3>
         <p className="text-sm text-muted max-w-sm">
           Connect an EVM wallet (MetaMask, Rabby) to see your positions and trade history.
