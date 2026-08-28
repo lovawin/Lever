@@ -51,7 +51,7 @@ export default function WalletBar() {
           accountStatus="address"
           chainStatus="icon"
           showBalance={false}
-          label={evmConnected ? "EVM ✓" : "Connect EVM"}
+          label={evmConnected ? "EVM " : "Connect EVM"}
         />
       </div>
       <button

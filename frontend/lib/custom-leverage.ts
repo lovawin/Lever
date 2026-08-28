@@ -238,6 +238,7 @@ export async function openCustomLeveragePosition(
 
   return { signatures, steps, provider: "kamino" };
 }
+
 // ─── Close / Manage an existing position ──────────────────────────────────
 
 export interface RepayParams {
@@ -245,14 +246,17 @@ export interface RepayParams {
   walletAdapter: any;
   connection: Connection;
   debtReserve: string;
-  amountUsdc: number;
+  amountUsdc: number; // pass a bit more than owed for "repay max" — Kamino
+                       // caps the actual repay to what's owed, it won't overdraw
   market?: string;
 }
 
+/** Repay some or all of the USDC debt on an existing obligation. */
 export async function repayKaminoDebt(params: RepayParams): Promise<LeverageResult> {
   const { walletAddress, walletAdapter, connection, debtReserve, amountUsdc } = params;
   if (!walletAddress) throw new Error("Solana wallet not connected.");
   if (amountUsdc <= 0) throw new Error("Repay amount must be greater than 0.");
+
   const tx = await kaminoRepay({
     wallet: walletAddress,
     market: params.market ?? KAMINO_MARKETS.main.address,
@@ -260,7 +264,11 @@ export async function repayKaminoDebt(params: RepayParams): Promise<LeverageResu
     amount: amountUsdc,
   });
   const sig = await signAndSendTransaction(tx, walletAdapter, connection);
-  return { signatures: [sig], steps: [`✅ Repaid ${amountUsdc.toFixed(4)} USDC: ${sig.slice(0, 8)}…`], provider: "kamino" };
+  return {
+    signatures: [sig],
+    steps: [`✅ Repaid ${amountUsdc.toFixed(4)} USDC: ${sig.slice(0, 8)}…`],
+    provider: "kamino",
+  };
 }
 
 export interface WithdrawParams {
@@ -272,10 +280,17 @@ export interface WithdrawParams {
   market?: string;
 }
 
+/**
+ * Withdraw SOL collateral from an existing obligation. If there's still
+ * outstanding debt, Kamino will only allow withdrawing down to the amount
+ * that keeps the position above its liquidation LTV — repay debt first if
+ * you want to withdraw everything.
+ */
 export async function withdrawKaminoCollateral(params: WithdrawParams): Promise<LeverageResult> {
   const { walletAddress, walletAdapter, connection, collateralReserve, amountSol } = params;
   if (!walletAddress) throw new Error("Solana wallet not connected.");
   if (amountSol <= 0) throw new Error("Withdraw amount must be greater than 0.");
+
   const tx = await kaminoWithdraw({
     wallet: walletAddress,
     market: params.market ?? KAMINO_MARKETS.main.address,
@@ -283,7 +298,11 @@ export async function withdrawKaminoCollateral(params: WithdrawParams): Promise<
     amount: amountSol,
   });
   const sig = await signAndSendTransaction(tx, walletAdapter, connection);
-  return { signatures: [sig], steps: [`✅ Withdrew ${amountSol.toFixed(4)} SOL: ${sig.slice(0, 8)}…`], provider: "kamino" };
+  return {
+    signatures: [sig],
+    steps: [`✅ Withdrew ${amountSol.toFixed(4)} SOL: ${sig.slice(0, 8)}…`],
+    provider: "kamino",
+  };
 }
 
 export interface ClosePositionParams {
@@ -292,15 +311,24 @@ export interface ClosePositionParams {
   connection: Connection;
   debtReserve: string;
   collateralReserve: string;
-  amountUsdcOwed: number;
-  amountSolDeposited: number;
+  amountUsdcOwed: number; // from refreshedStats.userTotalBorrow
+  amountSolDeposited: number; // from state.deposits[].depositedAmount / 1e9
 }
 
+/**
+ * Fully close a position: repay all debt, then withdraw all collateral.
+ * Two separate signed transactions — if repay succeeds but withdraw fails
+ * (e.g. price moved, LTV check), the debt is still gone and it's safe to
+ * retry just the withdraw.
+ */
 export async function closeKaminoPosition(params: ClosePositionParams): Promise<LeverageResult> {
   const steps: string[] = [];
   const signatures: string[] = [];
+
   if (params.amountUsdcOwed > 0) {
     steps.push("Step 1/2: Repaying USDC debt…");
+    // +0.5% buffer for interest accrued between quote and confirmation —
+    // Kamino caps the actual repay to what's owed, so this can't overdraw.
     const repayResult = await repayKaminoDebt({
       walletAddress: params.walletAddress,
       walletAdapter: params.walletAdapter,
@@ -313,6 +341,7 @@ export async function closeKaminoPosition(params: ClosePositionParams): Promise<
   } else {
     steps.push("No debt to repay.");
   }
+
   if (params.amountSolDeposited > 0) {
     steps.push("Step 2/2: Withdrawing SOL collateral…");
     const withdrawResult = await withdrawKaminoCollateral({
@@ -325,6 +354,7 @@ export async function closeKaminoPosition(params: ClosePositionParams): Promise<
     signatures.push(...withdrawResult.signatures);
     steps.push(...withdrawResult.steps);
   }
+
   steps.push("Position closed.");
   return { signatures, steps, provider: "kamino" };
 }

@@ -180,7 +180,7 @@ export default function FundingRate({ coin, testnet = false }: FundingRateProps)
         {isPositive ? (
           <>Longs pay shorts — demand to long {coin} exceeds shorts</>
         ) : rate8h === 0 ? (
-          <>⚪ Neutral — no funding payment this period</>
+          <>Neutral — no funding payment this period</>
         ) : (
           <>Shorts pay longs — demand to short {coin} exceeds longs</>
         )}

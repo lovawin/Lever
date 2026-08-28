@@ -123,17 +123,17 @@ export default function Page() {
                 : "text-muted hover:text-white hover:bg-white/5 border border-transparent"
             }`}
           >
-            ⚡ Perps
+            Perps
           </button>
           <button
             onClick={() => setTab("leverage")}
             className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 ${
               tab === "leverage"
-                ? "bg-purple-500/15 text-purple-400 border border-purple-500/30"
+                ? "bg-accent/15 text-accent border border-accent/30"
                 : "text-muted hover:text-white hover:bg-white/5 border border-transparent"
             }`}
           >
-            🌀 Spot Leverage
+            Spot Leverage
           </button>
           <button
             onClick={() => setTab("flash")}
@@ -143,7 +143,7 @@ export default function Page() {
                 : "text-muted hover:text-white hover:bg-white/5 border border-transparent"
             }`}
           >
-            💎 Flash Loans
+            Flash Loans
           </button>
         </div>
       </div>
@@ -199,13 +199,13 @@ export default function Page() {
           <div className="mx-auto max-w-[680px]">
             <div className="glass rounded-2xl p-5">
               <div className="text-center py-16">
-                <div className="text-5xl mb-4">💎</div>
+                <div className="text-5xl mb-4"></div>
                 <h2 className="text-xl font-black mb-2">Flash Loans</h2>
                 <p className="text-sm text-muted max-w-sm mx-auto">
                   Atomic flash loan strategies on Arbitrum — arbitrage, self-liquidation, and leverage loops. Powered by Aave v3.
                 </p>
                 <div className="mt-4 inline-block px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-muted">
-                  🔄 Coming Soon
+                  Coming Soon
                 </div>
               </div>
             </div>
@@ -529,7 +529,7 @@ function SpotLeveragePanel({
 
       setResult(leverageResult);
       setBridgeStep("done");
-      setBridgeStatus("✅ Bridge + leverage complete!");
+      setBridgeStatus("Bridge + leverage complete!");
     } catch (e: any) {
       setBridgeError(e?.message ?? String(e));
       setBridgeStep("idle");
@@ -619,12 +619,53 @@ function SpotLeveragePanel({
     }
   }, [selectedToken, connected, publicKey, wallet, connection, collateralSol, leverage, slippage, solPrice]);
 
+  // ─── Close an existing Kamino leverage position ───────────────────────
+  const handleClosePosition = useCallback(async (obs: KaminoObligation, index: number) => {
+    if (!connected || !publicKey || !wallet) {
+      setCloseError("Connect your Solana wallet first.");
+      return;
+    }
+    const borrow = obs.borrows[0];
+    const deposit = obs.deposits[0];
+    if (!deposit) {
+      setCloseError("No collateral found on this obligation.");
+      return;
+    }
+
+    setClosingIndex(index);
+    setCloseError(null);
+
+    try {
+      const res = await closeKaminoPosition({
+        walletAddress: publicKey.toBase58(),
+        walletAdapter: wallet.adapter,
+        connection,
+        debtReserve: borrow?.borrowReserve ?? "",
+        collateralReserve: deposit.depositReserve,
+        // borrowedValueUsd is USDC's own market value, ~1:1 with the token
+        // amount owed since it's a stablecoin.
+        amountUsdcOwed: borrow ? obs.borrowedValueUsd : 0,
+        // depositedAmount is raw lamports (SOL has 9 decimals).
+        amountSolDeposited: Number(deposit.depositedAmount) / 1e9,
+      });
+      setResult(res);
+      // Refresh obligations immediately rather than waiting for the 15s poll.
+      if (publicKey) {
+        getUserObligations(publicKey.toBase58()).then(setObligations).catch(() => {});
+      }
+    } catch (e: any) {
+      setCloseError(e?.message ?? String(e));
+    } finally {
+      setClosingIndex(null);
+    }
+  }, [connected, publicKey, wallet, connection]);
+
   const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
   const fmtNum = (n: number, d = 4) => n >= 1000 ? n.toFixed(0) : n >= 1 ? n.toFixed(2) : n.toFixed(d);
 
   return (
     <div>
-      <h2 className="text-lg font-black mb-1">🌀 Spot Leverage</h2>
+      <h2 className="text-lg font-black mb-1">Spot Leverage</h2>
       <p className="text-xs text-muted mb-4">
         Long any memecoin with leverage on Solana. SOL collateral → borrow USDC → swap to target.
       </p>
@@ -637,7 +678,7 @@ function SpotLeveragePanel({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search memecoin (e.g. BONK, WIF, MEME)..."
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono mb-3 focus:outline-none focus:border-purple-500/50 placeholder:text-muted/50"
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono mb-3 focus:outline-none focus:border-accent/50 placeholder:text-muted/50"
             autoFocus
           />
 
@@ -651,7 +692,7 @@ function SpotLeveragePanel({
                 <button
                   key={token.mint}
                   onClick={() => setSelectedToken(token)}
-                  className="w-full flex items-center gap-3 p-3 rounded-lg bg-white/[0.03] border border-white/5 hover:border-purple-500/30 hover:bg-purple-500/5 transition-all text-left"
+                  className="w-full flex items-center gap-3 p-3 rounded-lg bg-white/[0.03] border border-white/5 hover:border-accent/30 hover:bg-accent/5 transition-all text-left"
                 >
                   {token.logoUri ? (
                     <img src={token.logoUri} alt="" className="w-8 h-8 rounded-full" />
@@ -704,7 +745,7 @@ function SpotLeveragePanel({
             {selectedToken.logoUri ? (
               <img src={selectedToken.logoUri} alt="" className="w-10 h-10 rounded-full" />
             ) : (
-              <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center text-sm font-bold text-purple-400">
+              <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center text-sm font-bold text-accent">
                 {selectedToken.symbol.slice(0, 2)}
               </div>
             )}
@@ -740,7 +781,7 @@ function SpotLeveragePanel({
               <div className="flex rounded-lg border border-white/10 overflow-hidden text-xs font-bold">
                 <button
                   onClick={() => setDepositMode("sol")}
-                  className={`flex-1 py-2 ${depositMode === "sol" ? "bg-purple-500/20 text-purple-300" : "bg-white/[0.02] text-muted"}`}
+                  className={`flex-1 py-2 ${depositMode === "sol" ? "bg-accent/20 text-accent" : "bg-white/[0.02] text-muted"}`}
                 >
                   Deposit SOL directly
                 </button>
@@ -757,7 +798,7 @@ function SpotLeveragePanel({
             {showBridge && (!isSolanaConnected || depositMode === "bridge") && (
               <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 space-y-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">🌉</span>
+                  <span className="text-lg"></span>
                   <div>
                     <div className="text-sm font-bold text-blue-400">Cross-Chain Bridge</div>
                     <div className="text-[11px] text-muted">
@@ -773,7 +814,7 @@ function SpotLeveragePanel({
                     <div className="font-mono text-[11px] text-white truncate">{publicKey.toBase58()}</div>
                   </div>
                 ) : (
-                  <div className="text-xs text-yellow-400">⚠ Connect your Solana wallet (Phantom/Solflare) to receive bridged funds.</div>
+                  <div className="text-xs text-yellow-400">Connect your Solana wallet (Phantom/Solflare) to receive bridged funds.</div>
                 )}
 
                 {/* USDC amount to bridge */}
@@ -805,18 +846,18 @@ function SpotLeveragePanel({
                     bridgeUsdcAmount <= 0 ||
                     !connected || !publicKey
                   }
-                  className={`w-full py-3 rounded-xl text-sm font-black transition-all ${
+                  className={`w-full py-3 rounded text-sm font-semibold transition-colors ${
                     bridgeStep !== "idle" && bridgeStep !== "done"
-                      ? "bg-blue-500/30 text-blue-300 cursor-wait"
-                      : "bg-blue-500/20 text-blue-300 border border-blue-500/40 hover:bg-blue-500/30 hover:border-blue-500/60"
+                      ? "bg-accent/60 text-white cursor-wait"
+                      : "bg-accent text-white hover:bg-accent/90"
                   }`}
                 >
-                  {bridgeStep === "idle" && `🌉 Bridge & Open ${leverage}x Long`}
-                  {bridgeStep === "approving" && "🔄 Approving USDC…"}
-                  {bridgeStep === "bridging" && "🔄 Sign Bridge Tx…"}
-                  {bridgeStep === "waiting" && "⏳ Waiting for Bridge…"}
-                  {bridgeStep === "leveraging" && "⚡ Running Leverage Engine…"}
-                  {bridgeStep === "done" && "✅ Done! Open another?"}
+                  {bridgeStep === "idle" && `Bridge & Open ${leverage}x Long`}
+                  {bridgeStep === "approving" && "Approving USDC…"}
+                  {bridgeStep === "bridging" && "Sign Bridge Tx…"}
+                  {bridgeStep === "waiting" && "Waiting for Bridge…"}
+                  {bridgeStep === "leveraging" && "Running Leverage Engine…"}
+                  {bridgeStep === "done" && "Done! Open another?"}
                 </button>
 
                 {/* Bridge progress */}
@@ -839,7 +880,7 @@ function SpotLeveragePanel({
                 {/* Bridge error */}
                 {bridgeError && (
                   <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2.5 text-xs text-red-400">
-                    <div className="font-bold mb-0.5">❌ Bridge Error</div>
+                    <div className="font-bold mb-0.5">Bridge Error</div>
                     <div className="font-mono text-[11px] whitespace-pre-wrap">{bridgeError}</div>
                   </div>
                 )}
@@ -865,7 +906,7 @@ function SpotLeveragePanel({
                     <button
                       type="button"
                       onClick={() => setCollateralSol(Math.max(0, +(solBalance - SOL_FEE_RESERVE).toFixed(4)))}
-                      className="text-[10px] text-purple-400 hover:text-purple-300 font-mono"
+                      className="text-[10px] text-accent hover:text-accent font-mono"
                     >
                       Balance: {solBalance.toFixed(4)} SOL · Max
                     </button>
@@ -878,11 +919,11 @@ function SpotLeveragePanel({
                   step={0.1}
                   min={0}
                   placeholder="0.5"
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-purple-500/50"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-accent/50"
                 />
                 {solBalance !== null && collateralSol > solBalance - SOL_FEE_RESERVE && (
                   <div className="text-[10px] text-yellow-400 mt-1">
-                    ⚠ Leaves less than {SOL_FEE_RESERVE} SOL for fees — deposit will fail.
+                    Leaves less than {SOL_FEE_RESERVE} SOL for fees — deposit will fail.
                   </div>
                 )}
                 {solPrice && collateralSol > 0 && (
@@ -893,15 +934,30 @@ function SpotLeveragePanel({
               </div>
             )}
 
-            {/* Leverage Slider */}
+            {/* Leverage */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-bold text-muted uppercase tracking-wider">
+                <label className="text-xs font-medium text-muted uppercase tracking-wider">
                   Leverage
                 </label>
-                <span className={`text-sm font-black ${leverage >= 7 ? 'text-red-400' : leverage >= 5 ? 'text-orange-400' : 'text-purple-400'}`}>
+                <span className={`text-sm font-semibold font-mono ${leverage >= 8 ? "text-bear" : leverage >= 5 ? "text-accent" : "text-text"}`}>
                   {leverage}x
                 </span>
+              </div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {[2, 3, 5, 8, 10].map((lv) => (
+                  <button
+                    key={lv}
+                    onClick={() => setLeverage(lv)}
+                    className={`py-1.5 rounded text-xs font-medium font-mono border transition-colors ${
+                      leverage === lv
+                        ? "bg-accent border-accent text-white"
+                        : "bg-panel border-border text-muted hover:border-accent/50 hover:text-text"
+                    }`}
+                  >
+                    {lv}x
+                  </button>
+                ))}
               </div>
               <input
                 type="range"
@@ -910,13 +966,8 @@ function SpotLeveragePanel({
                 step={0.5}
                 value={leverage}
                 onChange={(e) => setLeverage(parseFloat(e.target.value))}
-                className="w-full accent-purple-500"
+                className="w-full mt-2"
               />
-              <div className="flex justify-between text-[10px] text-muted mt-0.5">
-                <span>2x</span>
-                <span>5x</span>
-                <span>10x</span>
-              </div>
             </div>
 
             {/* ── Estimates ── */}
@@ -946,13 +997,13 @@ function SpotLeveragePanel({
                 {estimate.estimatedTokens > 0 && selectedToken.priceUsd && (
                   <div className="pt-1 border-t border-white/5">
                     <div className="text-muted text-[10px]">Est. Tokens Received</div>
-                    <div className="font-mono font-bold text-purple-400 text-sm">
+                    <div className="font-mono font-bold text-accent text-sm">
                       {fmtNum(estimate.estimatedTokens)} {selectedToken.symbol}
                     </div>
                   </div>
                 )}
                 <div className="pt-1 border-t border-white/5 text-[10px] text-muted">
-                  ⚠ Liquidation if SOL drops {estimate.liquidationDropPct.toFixed(1)}% from entry
+                  Liquidation if SOL drops {estimate.liquidationDropPct.toFixed(1)}% from entry
                 </div>
               </div>
             )}
@@ -975,7 +1026,7 @@ function SpotLeveragePanel({
                     step={0.1}
                     value={slippage}
                     onChange={(e) => setSlippage(parseFloat(e.target.value))}
-                    className="w-full accent-purple-500 mt-1"
+                    className="w-full accent-accent mt-1"
                   />
                 </div>
               )}
@@ -984,12 +1035,12 @@ function SpotLeveragePanel({
             {/* ── Wallet Connection Warning ── */}
             {!connected && !evmConnected && (
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2.5 text-xs text-yellow-400">
-                ⚠ Connect a wallet to execute. Use EVM (MetaMask/Rainbow) for cross-chain, or Solana (Phantom) for direct leverage.
+                Connect a wallet to execute. Use EVM (MetaMask/Rainbow) for cross-chain, or Solana (Phantom) for direct leverage.
               </div>
             )}
             {evmConnected && !connected && (
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2.5 text-xs text-yellow-400">
-                ⚠ EVM wallet connected. Connect your Solana wallet (Phantom/Solflare) too — bridged funds go to your own wallet.
+                EVM wallet connected. Connect your Solana wallet (Phantom/Solflare) too — bridged funds go to your own wallet.
               </div>
             )}
 
@@ -1002,12 +1053,12 @@ function SpotLeveragePanel({
                   solBalance === null ||
                   collateralSol > solBalance - SOL_FEE_RESERVE
                 }
-                className={`w-full py-3 rounded-xl text-sm font-black transition-all ${
+                className={`w-full py-3 rounded text-sm font-semibold transition-colors ${
                   executing
-                    ? "bg-purple-500/30 text-purple-300 cursor-wait"
+                    ? "bg-accent/60 text-white cursor-wait"
                     : connected && collateralSol > 0 && solBalance !== null && collateralSol <= solBalance - SOL_FEE_RESERVE
-                    ? "bg-purple-500/20 text-purple-300 border border-purple-500/40 hover:bg-purple-500/30 hover:border-purple-500/60"
-                    : "bg-white/5 text-muted border border-white/5 cursor-not-allowed"
+                    ? "bg-accent text-white hover:bg-accent/90"
+                    : "bg-panel text-muted border border-border cursor-not-allowed"
                 }`}
               >
                 {executing
@@ -1034,11 +1085,11 @@ function SpotLeveragePanel({
             {/* ── Result Steps ── */}
             {result && !executing && (
               <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 space-y-1.5">
-                <div className="text-xs font-bold text-green-400 mb-1">📋 Transaction Steps</div>
+                <div className="text-xs font-bold text-green-400 mb-1">Transaction Steps</div>
                 {result.steps.map((step, i) => (
                   <div key={i} className="text-xs font-mono text-muted flex gap-2">
                     <span className="text-muted/50">{i + 1}.</span>
-                    <span className={step.startsWith("✅") ? "text-green-400" : step.startsWith("⚠") ? "text-yellow-400" : "text-muted"}>
+                    <span className={step.startsWith("") ? "text-green-400" : step.startsWith("") ? "text-yellow-400" : "text-muted"}>
                       {step}
                     </span>
                   </div>
@@ -1053,7 +1104,7 @@ function SpotLeveragePanel({
                         rel="noopener noreferrer"
                         className="block text-[10px] font-mono text-blue-400 hover:text-blue-300 truncate"
                       >
-                        🔗 {sig}
+                        {sig}
                       </a>
                     ))}
                   </div>
@@ -1064,7 +1115,7 @@ function SpotLeveragePanel({
             {/* ── Error ── */}
             {error && !executing && (
               <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-400">
-                <div className="font-bold mb-1">❌ Error</div>
+                <div className="font-bold mb-1">Error</div>
                 <div className="font-mono text-[11px] whitespace-pre-wrap">{error}</div>
               </div>
             )}
@@ -1073,7 +1124,7 @@ function SpotLeveragePanel({
             {connected && obligations.length > 0 && (
               <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 space-y-2">
                 <div className="text-xs font-bold text-white flex items-center gap-2">
-                  📊 Your Leverage Positions
+                  Your Leverage Positions
                   <span className="text-[10px] text-muted font-normal">({obligations.length})</span>
                 </div>
                 {obligations.map((obs, i) => (
@@ -1122,22 +1173,22 @@ function SpotLeveragePanel({
             )}
 
             {/* ── How It Works ── */}
-            <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3">
-              <div className="text-xs font-bold text-purple-400 mb-1">How Custom Leverage Works</div>
+            <div className="bg-accent/10 border border-accent/20 rounded-xl p-3">
+              <div className="text-xs font-bold text-accent mb-1">How Custom Leverage Works</div>
               {isEvmOnly ? (
                 <div className="text-xs text-muted space-y-1">
                   <div>1. <span className="text-white">Bridge</span> — deBridge sends USDC from Arbitrum to your connected Solana wallet</div>
                   <div>2. <span className="text-white">Swap</span> — Jupiter swaps bridged USDC → SOL (collateral)</div>
                   <div>3. <span className="text-white">Borrow</span> — Kamino borrows USDC against SOL with leverage</div>
                   <div>4. <span className="text-white">Swap</span> — Jupiter swaps borrowed USDC → {selectedToken.symbol}</div>
-                  <div className="pt-1 text-yellow-400/80">⚠ Your SOL collateral is at risk if liquidated. Manage risk carefully.</div>
+                  <div className="pt-1 text-yellow-400/80">Your SOL collateral is at risk if liquidated. Manage risk carefully.</div>
                 </div>
               ) : (
                 <div className="text-xs text-muted space-y-1">
                   <div>1. <span className="text-white">Setup</span> — Create Kamino obligation (SOL collateral, USDC debt)</div>
                   <div>2. <span className="text-white">Borrow</span> — Kamino opens leveraged position, borrows USDC against SOL</div>
                   <div>3. <span className="text-white">Swap</span> — Jupiter swaps borrowed USDC → {selectedToken.symbol}</div>
-                  <div className="pt-1 text-yellow-400/80">⚠ Your SOL collateral is at risk if liquidated. Manage risk carefully.</div>
+                  <div className="pt-1 text-yellow-400/80">Your SOL collateral is at risk if liquidated. Manage risk carefully.</div>
                 </div>
               )}
             </div>
@@ -1159,18 +1210,18 @@ function ProgressStep({
   step: number;
   steps?: string[];
 }) {
-  const doneCount = steps?.filter(s => s.startsWith("✅") || s.startsWith("ℹ") || s.startsWith("⚠")).length ?? 0;
+  const doneCount = steps?.filter(s => s.startsWith("") || s.startsWith("ℹ") || s.startsWith("")).length ?? 0;
   const isDone = step < doneCount;
   const isInProgress = step === doneCount;
   const isPending = step > doneCount;
 
   return (
-    <div className={`flex items-center gap-2 text-xs ${isDone ? "text-green-400" : isInProgress ? "text-purple-400" : "text-muted/50"}`}>
+    <div className={`flex items-center gap-2 text-xs ${isDone ? "text-green-400" : isInProgress ? "text-accent" : "text-muted/50"}`}>
       <div className={`
         w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0
-        ${isDone ? "bg-green-500/20" : isInProgress ? "bg-purple-500/20 animate-pulse" : "bg-white/5"}
+        ${isDone ? "bg-green-500/20" : isInProgress ? "bg-accent/20 animate-pulse" : "bg-white/5"}
       `}>
-        {isDone ? "✓" : step + 1}
+        {isDone ? "" : step + 1}
       </div>
       <span>{label}</span>
     </div>
@@ -1208,7 +1259,7 @@ function BridgeProgressStep({
             : "bg-white/5"
         }`}
       >
-        {isDone ? "✓" : stepIdx + 1}
+        {isDone ? "" : stepIdx + 1}
       </div>
       <span>{label}</span>
     </div>

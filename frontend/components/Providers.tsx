@@ -9,6 +9,10 @@ import {
   ConnectionProvider,
   WalletProvider,
 } from "@solana/wallet-adapter-react";
+// Import adapters directly from their scoped packages instead of the
+// @solana/wallet-adapter-wallets meta-bundle — that bundle pulls in ~30
+// adapters we don't use, including the deprecated Particle Network one,
+// whose broken @particle-network/chains dependency was failing prod builds.
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 import { clusterApiUrl } from "@solana/web3.js";

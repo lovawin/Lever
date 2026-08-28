@@ -397,6 +397,71 @@ export async function kaminoOpenPosition(params: KaminoLeverageParams): Promise<
   return data.transaction;
 }
 
+export interface KaminoRepayParams {
+  wallet: string;
+  market?: string;
+  reserve: string;   // debt reserve being repaid
+  amount: number;    // decimal amount (not lamports), e.g. 3.87 USDC
+}
+
+/**
+ * Repay debt on an existing Kamino obligation.
+ * Routed through /api/kamino/repay (same CORS-avoidance pattern as every
+ * other Kamino call here) which forwards to POST /ktx/klend/repay.
+ * Returns a base64-encoded VersionedTransaction for wallet signing.
+ */
+export async function kaminoRepay(params: KaminoRepayParams): Promise<string> {
+  const market = params.market ?? KAMINO_MARKETS.main.address;
+  const r = await fetch(`${KAMINO_API}/repay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      wallet: params.wallet,
+      market,
+      reserve: params.reserve,
+      amount: String(params.amount),
+    }),
+  });
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(`Kamino repay failed (${r.status}): ${err}`);
+  }
+  const data = await r.json();
+  return data.transaction;
+}
+
+export interface KaminoWithdrawParams {
+  wallet: string;
+  market?: string;
+  reserve: string;   // collateral reserve being withdrawn from
+  amount: number;    // decimal amount (not lamports), e.g. 0.06 SOL
+}
+
+/**
+ * Withdraw collateral from an existing Kamino obligation.
+ * Routed through /api/kamino/withdraw, forwards to POST /ktx/klend/withdraw.
+ * Returns a base64-encoded VersionedTransaction for wallet signing.
+ */
+export async function kaminoWithdraw(params: KaminoWithdrawParams): Promise<string> {
+  const market = params.market ?? KAMINO_MARKETS.main.address;
+  const r = await fetch(`${KAMINO_API}/withdraw`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      wallet: params.wallet,
+      market,
+      reserve: params.reserve,
+      amount: String(params.amount),
+    }),
+  });
+  if (!r.ok) {
+    const err = await r.text();
+    throw new Error(`Kamino withdraw failed (${r.status}): ${err}`);
+  }
+  const data = await r.json();
+  return data.transaction;
+}
+
 /**
  * Get available Kamino markets from the REST API.
  */

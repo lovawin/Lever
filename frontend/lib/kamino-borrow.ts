@@ -450,6 +450,11 @@ export interface KaminoObligation {
 export async function getUserObligations(
   walletAddress: string,
 ): Promise<KaminoObligation[]> {
+  // Routed through our own /api/kamino/obligations proxy (like every other
+  // Kamino call in this file) — calling api.kamino.finance directly from the
+  // browser was getting silently CORS-blocked, so positions never rendered
+  // even though the obligation existed and the raw endpoint worked fine when
+  // opened directly in a tab.
   const res = await fetch(
     `${KAMINO_API}/obligations?market=${KAMINO_MAIN_MARKET}&wallet=${walletAddress}`,
     { signal: abortWithTimeout(10000) },
@@ -462,6 +467,12 @@ export async function getUserObligations(
   const data = await res.json();
   if (!Array.isArray(data)) return [];
 
+  // Real response shape (confirmed against a live obligation) has no `stats`
+  // object at all — dollar figures live under `refreshedStats` with different
+  // field names, and `state.deposits`/`state.borrows` are the raw on-chain
+  // arrays (borrows use `borrowedAmountSf`, not `borrowedAmount`). The old
+  // mapping read fields that don't exist, so every position silently showed
+  // $0.00 / health factor 0.00 regardless of what was actually deposited.
   return data.map((o: any) => {
     const stats = o.refreshedStats ?? {};
     const userTotalBorrow = parseFloat(stats.userTotalBorrow ?? "0");
@@ -470,6 +481,8 @@ export async function getUserObligations(
       obligationAddress: o.obligationAddress,
       deposits: (o.state?.deposits ?? []).filter((d: any) => d.depositedAmount !== "0"),
       borrows: (o.state?.borrows ?? []).filter((b: any) => b.borrowedAmountSf !== "0"),
+      // No liquidation risk with zero debt — treat as maximally healthy
+      // rather than dividing by zero.
       healthFactor: userTotalBorrow > 0 ? borrowLiquidationLimit / userTotalBorrow : 999,
       borrowedValueUsd: userTotalBorrow,
       collateralValueUsd: parseFloat(stats.userTotalCollateralDeposit ?? "0"),

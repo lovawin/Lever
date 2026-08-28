@@ -75,11 +75,11 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
       const filled = status?.filled;
       const resting = status?.resting;
       if (filled) {
-        setResult(`✅ Filled: ${filled.totalSz} @ $${filled.avgPx}`);
+        setResult(`Filled: ${filled.totalSz} @ $${filled.avgPx}`);
       } else if (resting) {
-        setResult(`📋 Order placed (oid: ${resting.oid})`);
+        setResult(`Order placed (oid: ${resting.oid})`);
       } else {
-        setResult(`✅ Order sent`);
+        setResult(`Order sent`);
       }
     } catch (e: any) {
       setErr(e?.shortMessage ?? e?.message ?? String(e));
@@ -92,7 +92,7 @@ export default function TradePanel({ mids, selectedCoin: selectedCoinProp, onCoi
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold">⚡ Memecoin Perps</h2>
+        <h2 className="text-lg font-bold">Memecoin Perps</h2>
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-bull pulse-dot" />
           <span className="text-[10px] uppercase tracking-widest text-bull">Live</span>
