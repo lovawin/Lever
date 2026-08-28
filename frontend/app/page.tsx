@@ -619,47 +619,6 @@ function SpotLeveragePanel({
     }
   }, [selectedToken, connected, publicKey, wallet, connection, collateralSol, leverage, slippage, solPrice]);
 
-  // ─── Close an existing Kamino leverage position ───────────────────────
-  const handleClosePosition = useCallback(async (obs: KaminoObligation, index: number) => {
-    if (!connected || !publicKey || !wallet) {
-      setCloseError("Connect your Solana wallet first.");
-      return;
-    }
-    const borrow = obs.borrows[0];
-    const deposit = obs.deposits[0];
-    if (!deposit) {
-      setCloseError("No collateral found on this obligation.");
-      return;
-    }
-
-    setClosingIndex(index);
-    setCloseError(null);
-
-    try {
-      const res = await closeKaminoPosition({
-        walletAddress: publicKey.toBase58(),
-        walletAdapter: wallet.adapter,
-        connection,
-        debtReserve: borrow?.borrowReserve ?? "",
-        collateralReserve: deposit.depositReserve,
-        // borrowedValueUsd is USDC's own market value, ~1:1 with the token
-        // amount owed since it's a stablecoin.
-        amountUsdcOwed: borrow ? obs.borrowedValueUsd : 0,
-        // depositedAmount is raw lamports (SOL has 9 decimals).
-        amountSolDeposited: Number(deposit.depositedAmount) / 1e9,
-      });
-      setResult(res);
-      // Refresh obligations immediately rather than waiting for the 15s poll.
-      if (publicKey) {
-        getUserObligations(publicKey.toBase58()).then(setObligations).catch(() => {});
-      }
-    } catch (e: any) {
-      setCloseError(e?.message ?? String(e));
-    } finally {
-      setClosingIndex(null);
-    }
-  }, [connected, publicKey, wallet, connection]);
-
   const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
   const fmtNum = (n: number, d = 4) => n >= 1000 ? n.toFixed(0) : n >= 1 ? n.toFixed(2) : n.toFixed(d);
 
